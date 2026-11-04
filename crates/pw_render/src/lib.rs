@@ -81,7 +81,7 @@ struct ChunkView {
 struct Views {
     chunks: HashMap<ChunkPos, ChunkView>,
     pawns: HashMap<u32, (Entity, Entity)>,
-    items: HashMap<u32, (Entity, usize)>,
+    items: HashMap<u32, (Entity, usize, TilePos)>,
     blueprints: HashMap<u32, Entity>,
     item_images: HashMap<usize, Handle<Image>>,
     bp_images: HashMap<(usize, u64), (Handle<Image>, i32, i32, u32, u32)>,
@@ -176,17 +176,29 @@ fn particle_color(content: &Content, m: MatId, seed: u64, x: i32, y: i32, layer:
     shade(rt.color, 1.0 + (h - 0.5) * rt.variance)
 }
 
-/// Paint one chunk into its two images.
-fn paint_chunk(chunk: &Chunk, content: &Content, seed: u64, base: &mut [u8], over: &mut [u8]) {
+/// Shading reaches this many cells from a changed particle.
+const SHADE_REACH: i32 = 3;
+
+type Rect = (i32, i32, i32, i32);
+
+fn grow(r: Rect) -> Rect {
+    let m = CHUNK - 1;
+    ((r.0 - SHADE_REACH).max(0), (r.1 - SHADE_REACH).max(0), (r.2 + SHADE_REACH).min(m), (r.3 + SHADE_REACH).min(m))
+}
+
+fn mat_at(v: &[MatId], lx: i32, ly: i32) -> MatId {
+    if (0..CHUNK).contains(&lx) && (0..CHUNK).contains(&ly) { v[(ly * CHUNK + lx) as usize] } else { NONE_MAT }
+}
+
+/// Paint ground + solids for the cells in `r` (local, inclusive).
+fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [u8]) {
     let (ox, oy) = chunk.pos.origin();
     let solid = &chunk.mat[1];
     let overlay = &chunk.mat[2];
-    let at = |v: &Vec<MatId>, lx: i32, ly: i32| -> MatId {
-        if (0..CHUNK).contains(&lx) && (0..CHUNK).contains(&ly) { v[(ly * CHUNK + lx) as usize] } else { NONE_MAT }
-    };
-    for ly in 0..CHUNK {
+    let blocks = |m: MatId| m != NONE_MAT && content.mat_rt(m).blocks;
+    for ly in r.1..=r.3 {
         let row = (CHUNK - 1 - ly) as usize;
-        for lx in 0..CHUNK {
+        for lx in r.0..=r.2 {
             let i = (ly * CHUNK + lx) as usize;
             let p = (row * CHUNK as usize + lx as usize) * 4;
             let (x, y) = (ox + lx, oy + ly);
@@ -194,40 +206,54 @@ fn paint_chunk(chunk: &Chunk, content: &Content, seed: u64, base: &mut [u8], ove
             let col = if s != NONE_MAT {
                 // Fake height: lit top edge, dark bottom edge.
                 let mut c = particle_color(content, s, seed, x, y, 1);
-                let blocks = content.mat_rt(s).blocks;
-                if blocks && at(solid, lx, ly - 1) == NONE_MAT {
+                if blocks(s) && mat_at(solid, lx, ly - 1) == NONE_MAT {
                     c = shade(c, 0.62);
-                } else if at(solid, lx, ly + 1) == NONE_MAT {
+                } else if mat_at(solid, lx, ly + 1) == NONE_MAT {
                     c = shade(c, 1.18);
                 }
                 c
             } else {
                 let mut c = particle_color(content, chunk.mat[0][i], seed, x, y, 0);
                 // Shadows from walls/rocks just below them and from canopies offset down-right.
-                let above = at(solid, lx, ly + 1);
-                if above != NONE_MAT && content.mat_rt(above).blocks {
+                if blocks(mat_at(solid, lx, ly + 1)) {
                     c = shade(c, 0.6);
-                } else if at(solid, lx - 1, ly + 2) != NONE_MAT && content.mat_rt(at(solid, lx - 1, ly + 2)).blocks {
+                } else if blocks(mat_at(solid, lx - 1, ly + 2)) {
                     c = shade(c, 0.8);
-                } else if at(overlay, lx - 3, ly + 3) != NONE_MAT && content.mat_rt(at(overlay, lx - 3, ly + 3)).color[3] > 128 {
-                    c = shade(c, 0.78);
+                } else {
+                    let o = mat_at(overlay, lx - 3, ly + 3);
+                    if o != NONE_MAT && content.mat_rt(o).color[3] > 128 {
+                        c = shade(c, 0.78);
+                    }
                 }
                 c
             };
             base[p..p + 4].copy_from_slice(&[col[0], col[1], col[2], 255]);
+        }
+    }
+}
+
+/// Paint the overlay layer (canopies, roofs) for the cells in `r`.
+fn paint_over(chunk: &Chunk, content: &Content, seed: u64, r: Rect, over: &mut [u8]) {
+    let (ox, oy) = chunk.pos.origin();
+    let overlay = &chunk.mat[2];
+    for ly in r.1..=r.3 {
+        let row = (CHUNK - 1 - ly) as usize;
+        for lx in r.0..=r.2 {
+            let i = (ly * CHUNK + lx) as usize;
+            let p = (row * CHUNK as usize + lx as usize) * 4;
             let o = overlay[i];
-            if o != NONE_MAT {
-                let mut c = particle_color(content, o, seed, x, y, 2);
-                let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| at(overlay, lx + dx, ly + dy) == NONE_MAT);
-                if edge {
-                    c = shade(c, 0.8);
-                } else if at(overlay, lx + 1, ly + 1) == NONE_MAT {
-                    c = shade(c, 1.12);
-                }
-                over[p..p + 4].copy_from_slice(&c);
-            } else {
+            if o == NONE_MAT {
                 over[p..p + 4].copy_from_slice(&[0, 0, 0, 0]);
+                continue;
             }
+            let mut c = particle_color(content, o, seed, ox + lx, oy + ly, 2);
+            let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| mat_at(overlay, lx + dx, ly + dy) == NONE_MAT);
+            if edge {
+                c = shade(c, 0.8);
+            } else if mat_at(overlay, lx + 1, ly + 1) == NONE_MAT {
+                c = shade(c, 1.12);
+            }
+            over[p..p + 4].copy_from_slice(&c);
         }
     }
 }
@@ -253,7 +279,7 @@ fn sync_chunks(
         images.remove(&v.base_img);
         images.remove(&v.over_img);
     }
-    let mut painted = 0;
+    let mut full_paints = 0;
     for (cp, chunk) in g.world.chunks.iter_mut() {
         if !views.chunks.contains_key(cp) {
             let base_img = images.add(new_image(CHUNK as u32, CHUNK as u32));
@@ -267,34 +293,46 @@ fn sync_chunks(
                 .spawn((Sprite::from_image(over_img.clone()), Transform::from_xyz(center.x, center.y, 20.0), ChunkLayer))
                 .id();
             views.chunks.insert(*cp, ChunkView { base, over, base_img, over_img });
-            chunk.render_dirty = true;
+            chunk.mark_render_all();
         }
-        // Budget repaints per frame; the rest catch up next frame.
-        if chunk.render_dirty && painted < 6 {
-            let v = &views.chunks[cp];
-            let (bh, oh) = (v.base_img.clone(), v.over_img.clone());
-            let mut over_buf = vec![0u8; CHUNK_CELLS * 4];
-            if let Some(mut img) = images.get_mut(&bh) {
-                if let Some(data) = img.data.as_mut() {
-                    paint_chunk(chunk, &content, seed, data, &mut over_buf);
-                }
-            }
-            if let Some(mut img) = images.get_mut(&oh) {
-                if let Some(data) = img.data.as_mut() {
-                    data.copy_from_slice(&over_buf);
-                }
-            }
-            chunk.render_dirty = false;
-            painted += 1;
+        if !chunk.render_dirty {
+            continue;
         }
+        // Small changes (chopping, fire) redraw only the area around them and
+        // are cheap; whole-chunk paints are budgeted per frame.
+        let rect = match chunk.render_rect {
+            Some(r) => grow(r),
+            None if full_paints < 6 => (0, 0, CHUNK - 1, CHUNK - 1),
+            None => continue,
+        };
+        if chunk.render_rect.is_none() {
+            full_paints += 1;
+        }
+        let v = &views.chunks[cp];
+        let (bh, oh) = (v.base_img.clone(), v.over_img.clone());
+        if let Some(mut img) = images.get_mut(&bh) {
+            if let Some(data) = img.data.as_mut() {
+                paint_base(chunk, &content, seed, rect, data);
+            }
+        }
+        if let Some(mut img) = images.get_mut(&oh) {
+            if let Some(data) = img.data.as_mut() {
+                paint_over(chunk, &content, seed, rect, data);
+            }
+        }
+        chunk.render_dirty = false;
+        chunk.render_rect = None;
     }
     // Overlay visibility / fade.
     for v in views.chunks.values() {
         if let Ok(mut vis) = vis.get_mut(v.over) {
-            *vis = if settings.show_overlay { Visibility::Inherited } else { Visibility::Hidden };
+            vis.set_if_neq(if settings.show_overlay { Visibility::Inherited } else { Visibility::Hidden });
         }
         if let Ok(mut s) = sprites.get_mut(v.over) {
-            s.color = Color::srgba(1.0, 1.0, 1.0, settings.overlay_alpha);
+            let c = Color::srgba(1.0, 1.0, 1.0, settings.overlay_alpha);
+            if s.color != c {
+                s.color = c;
+            }
         }
     }
 }
@@ -336,23 +374,25 @@ fn sync_items(mut commands: Commands, game: Res<GameRes>, mut views: ResMut<View
     let live: HashSet<u32> = g.colony.items.stacks.keys().copied().collect();
     let gone: Vec<u32> = views.items.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
-        let (e, _) = views.items.remove(&id).unwrap();
+        let (e, _, _) = views.items.remove(&id).unwrap();
         commands.entity(e).despawn();
     }
     for s in g.colony.items.stacks.values() {
         let (x, y) = s.tile.center();
         let pos = Transform::from_xyz(x, y, 3.0);
         match views.items.get(&s.id) {
-            Some(&(e, item)) if item == s.item => {
+            Some(&(_, item, tile)) if item == s.item && tile == s.tile => {}
+            Some(&(e, item, _)) if item == s.item => {
                 commands.entity(e).insert(pos);
+                views.items.insert(s.id, (e, item, s.tile));
             }
             other => {
-                if let Some(&(e, _)) = other {
+                if let Some(&(e, _, _)) = other {
                     commands.entity(e).despawn();
                 }
                 let img = item_image(&mut views, &mut images, &g.content, s.item);
                 let e = commands.spawn((Sprite::from_image(img), pos, ItemSprite)).id();
-                views.items.insert(s.id, (e, s.item));
+                views.items.insert(s.id, (e, s.item, s.tile));
             }
         }
     }
@@ -405,7 +445,8 @@ fn sync_pawns(
     game: Res<GameRes>,
     mut views: ResMut<Views>,
     mut images: ResMut<Assets<Image>>,
-    mut carry: Query<(&mut Sprite, &mut Visibility), With<CarrySprite>>,
+    mut carry: Query<(&mut Sprite, &mut Visibility, &mut Transform), (With<CarrySprite>, Without<PawnSprite>)>,
+    mut bodies: Query<&mut Transform, (With<PawnSprite>, Without<CarrySprite>)>,
 ) {
     let g = &game.0;
     let live: HashSet<u32> = g.colony.pawns.iter().map(|p| p.id).collect();
@@ -420,15 +461,22 @@ fn sync_pawns(
         let carry_pos = Transform::from_xyz(p.pos.0 + 3.0, p.pos.1 + 4.0, 11.0);
         match views.pawns.get(&p.id) {
             Some(&(e, c)) => {
-                commands.entity(e).insert(pos);
-                commands.entity(c).insert(carry_pos);
-                if let Ok((mut s, mut vis)) = carry.get_mut(c) {
+                if let Ok(mut t) = bodies.get_mut(e) {
+                    t.translation = pos.translation;
+                }
+                if let Ok((mut s, mut vis, mut t)) = carry.get_mut(c) {
+                    t.translation = carry_pos.translation;
                     match p.carrying {
                         Some((item, _)) => {
-                            s.image = item_image(&mut views, &mut images, &g.content, item);
-                            *vis = Visibility::Inherited;
+                            let img = item_image(&mut views, &mut images, &g.content, item);
+                            if s.image != img {
+                                s.image = img;
+                            }
+                            vis.set_if_neq(Visibility::Inherited);
                         }
-                        None => *vis = Visibility::Hidden,
+                        None => {
+                            vis.set_if_neq(Visibility::Hidden);
+                        }
                     }
                 }
             }

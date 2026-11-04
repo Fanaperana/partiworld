@@ -27,11 +27,9 @@ fn apply(world: &mut World, content: &Content, rng: &mut Rng, r: &ReactionRt, x:
     }
     let mut other = None;
     if let Some((nl, mask, same)) = &r.neighbor {
-        let mut opts: Vec<(i32, i32)> = DIRS.to_vec();
-        if *same && *nl != r.layer {
-            opts.push((0, 0));
-        }
-        let (dx, dy) = opts[rng.below(opts.len())];
+        // Four neighbours, plus this same cell on the other layer when allowed.
+        let n = if *same && *nl != r.layer { 5 } else { 4 };
+        let (dx, dy) = DIRS.get(rng.below(n)).copied().unwrap_or((0, 0));
         let (nx, ny) = (x + dx, y + dy);
         if !world.is_loaded(nx, ny) {
             return false;
@@ -106,20 +104,34 @@ pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimS
         }
     }
 
-    // Random ticks.
+    // Random ticks. Layers with no random reactions at all are skipped.
+    let layers: Vec<Layer> = Layer::ALL.into_iter().filter(|l| rx.random[l.index()].iter().any(|v| !v.is_empty())).collect();
+    if layers.is_empty() {
+        return;
+    }
+    let mut hits: Vec<(i32, i32, Layer, MatId)> = Vec::new();
     for cp in &keys {
         let (ox, oy) = cp.origin();
-        for _ in 0..settings.random_samples {
-            let i = rng.below(CHUNK_CELLS) as i32;
-            let (x, y) = (ox + i % CHUNK, oy + i / CHUNK);
-            for layer in Layer::ALL {
-                let m = world.get(x, y, layer);
-                if let Some(list) = rx.random[layer.index()].get(m as usize) {
-                    for &ri in list {
-                        if apply(world, content, rng, &rx.list[ri], x, y) {
-                            break;
-                        }
+        // Read the chunk directly (no per-cell map lookup), then react.
+        hits.clear();
+        if let Some(chunk) = world.chunks.get(cp) {
+            for _ in 0..settings.random_samples {
+                let i = rng.below(CHUNK_CELLS);
+                for &layer in &layers {
+                    let m = chunk.mat[layer.index()][i];
+                    if rx.random[layer.index()].get(m as usize).is_some_and(|v| !v.is_empty()) {
+                        hits.push((ox + i as i32 % CHUNK, oy + i as i32 / CHUNK, layer, m));
                     }
+                }
+            }
+        }
+        for &(x, y, layer, m) in &hits {
+            if world.get(x, y, layer) != m {
+                continue; // changed by an earlier reaction this tick
+            }
+            for &ri in &rx.random[layer.index()][m as usize] {
+                if apply(world, content, rng, &rx.list[ri], x, y) {
+                    break;
                 }
             }
         }

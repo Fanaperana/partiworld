@@ -197,6 +197,51 @@ fn colonists_build_and_haul() {
 }
 
 #[test]
+fn builders_finish_room_from_outside() {
+    let mut g = new_game(9);
+    let home = g.spawn_tile();
+    let c = g.content.clone();
+    for t in TileRect::from_corners(home.offset(-1, -1), home.offset(9, 9)).iter() {
+        for o in g.world.objects_in_tile(t) {
+            pw_objects::destroy(&mut g.world, &c, o);
+        }
+    }
+    g.world.rebuild_tiles(&c);
+    // Lots of other work around, at a lower global priority than building.
+    g.designate("core:chop", TileRect::from_corners(home.offset(-20, -20), home.offset(20, 20)), None);
+    let room = TileRect::from_corners(home.offset(2, 2), home.offset(8, 8));
+    let walls = g.build("core:wall_wood", room);
+    assert!(walls >= 20, "placed {walls}");
+    let ticks = std::cell::Cell::new(0u32);
+    let ok = run(&mut g, 30 * 400, |g| {
+        ticks.set(ticks.get() + 1);
+        g.colony.blueprints.is_empty()
+    });
+    assert!(ok, "room not built; {} blueprints left", g.colony.blueprints.len());
+    println!("room of {walls} walls built in {} ticks", ticks.get());
+    let inside = TileRect::from_corners(home.offset(3, 3), home.offset(7, 7));
+    for p in &g.colony.pawns {
+        assert!(!inside.contains(p.tile()), "{} got walled in", p.name);
+    }
+}
+
+#[test]
+fn work_priorities_turn_jobs_off() {
+    let mut g = new_game(3);
+    g.load_chunks_now(ChunkPos::new(-2, -2), ChunkPos::new(2, 2));
+    for p in &mut g.colony.pawns {
+        p.work.insert("core:chop".into(), 0);
+    }
+    let (tree, tile) = nearest_object_with_tag(&g, "tree").expect("a tree nearby");
+    g.designate("core:chop", TileRect::from_corners(tile, tile), None);
+    run(&mut g, 30 * 60, |_| false);
+    assert!(g.world.objects.get(tree).is_some(), "tree chopped with chopping turned off");
+    assert_eq!(g.world.objects.get(tree).unwrap().removed, 0);
+    g.colony.pawns[0].work.insert("core:chop".into(), 1);
+    assert!(run(&mut g, 30 * 120, |g| g.world.objects.get(tree).is_none()), "tree not felled once allowed");
+}
+
+#[test]
 fn colonists_mine_rock() {
     let mut g = new_game(21);
     let home = g.spawn_tile();
@@ -278,4 +323,28 @@ fn debug_fire() {
         eprintln!("t={s:>3}s fire={n} active={act} tree={inst:?}");
         for _ in 0..30 { g.step(); }
     }
+}
+
+/// `cargo test --release -p pw_game --test game bench -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn bench_busy_colony() {
+    let mut g = new_game(5);
+    let home = g.spawn_tile();
+    for i in 0..9 {
+        g.spawn_colonist(home.offset(i % 3, i / 3));
+    }
+    g.load_chunks_now(ChunkPos::new(-3, -3), ChunkPos::new(3, 3));
+    let big = TileRect::from_corners(home.offset(-60, -60), home.offset(60, 60));
+    g.designate("core:chop", big, None);
+    g.designate("core:harvest", big, None);
+    g.designate("core:quarry", big, None);
+    g.stockpile(TileRect::from_corners(home.offset(-8, -8), home.offset(-3, -3)), true);
+    g.build("core:wall_wood", TileRect::from_corners(home.offset(4, 4), home.offset(12, 12)));
+    let t = std::time::Instant::now();
+    for _ in 0..3000 {
+        g.step();
+    }
+    let ms = t.elapsed().as_secs_f64() * 1000.0;
+    println!("BENCH {:.3} ms/tick, {} designations left, {} blueprints left", ms / 3000.0, g.colony.designations.len(), g.colony.blueprints.len());
 }

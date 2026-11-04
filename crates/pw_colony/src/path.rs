@@ -1,9 +1,9 @@
 //! A* over the tile grid (8 directions, no corner cutting).
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 
-use pw_core::TilePos;
+use pw_core::{FastMap, TilePos};
 use pw_world::World;
 
 #[derive(Copy, Clone, PartialEq)]
@@ -43,7 +43,7 @@ pub fn find_path(
         return Some(Vec::new());
     }
     let mut open = BinaryHeap::new();
-    let mut came: HashMap<TilePos, (f32, TilePos)> = HashMap::new();
+    let mut came: FastMap<TilePos, (f32, TilePos)> = FastMap::default();
     came.insert(start, (0.0, start));
     open.push(Node { f: octile(start, hint), t: start });
     let mut expanded = 0;
@@ -79,6 +79,66 @@ pub fn find_path(
             if came.get(&n).is_none_or(|&(og, _)| ng < og) {
                 came.insert(n, (ng, t));
                 open.push(Node { f: ng + octile(n, hint), t: n });
+            }
+        }
+    }
+    None
+}
+
+/// Walk outward from `start` (cheapest first) until a tile where `goal`
+/// returns a value. One search finds the nearest of many targets.
+/// Returns that value and the path, reversed like `find_path`.
+pub fn find_nearest<T>(
+    world: &World,
+    start: TilePos,
+    goal: impl Fn(TilePos) -> Option<T>,
+    max_nodes: usize,
+) -> Option<(T, Vec<TilePos>)> {
+    if let Some(v) = goal(start) {
+        return Some((v, Vec::new()));
+    }
+    let mut open = BinaryHeap::new();
+    let mut came: FastMap<TilePos, (f32, TilePos)> = FastMap::default();
+    came.insert(start, (0.0, start));
+    open.push(Node { f: 0.0, t: start });
+    let mut expanded = 0;
+    while let Some(Node { t, f }) = open.pop() {
+        let g = came[&t].0;
+        if f > g {
+            continue; // stale entry
+        }
+        if t != start {
+            if let Some(v) = goal(t) {
+                let mut path = vec![t];
+                let mut cur = t;
+                while let Some(&(_, p)) = came.get(&cur) {
+                    if p == start {
+                        break;
+                    }
+                    path.push(p);
+                    cur = p;
+                }
+                return Some((v, path));
+            }
+        }
+        expanded += 1;
+        if expanded > max_nodes {
+            return None;
+        }
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            let n = t.offset(dx, dy);
+            let Some(info) = world.tile(n) else { continue };
+            if !info.walkable {
+                continue;
+            }
+            if dx != 0 && dy != 0 && !(world.walkable(t.offset(dx, 0)) && world.walkable(t.offset(0, dy))) {
+                continue;
+            }
+            let step = if dx != 0 && dy != 0 { std::f32::consts::SQRT_2 } else { 1.0 };
+            let ng = g + step * info.cost.max(0.1);
+            if came.get(&n).is_none_or(|&(og, _)| ng < og) {
+                came.insert(n, (ng, t));
+                open.push(Node { f: ng, t: n });
             }
         }
     }

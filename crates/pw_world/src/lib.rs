@@ -36,6 +36,10 @@ pub struct Chunk {
     pub any_tile_dirty: bool,
     #[serde(skip)]
     pub render_dirty: bool,
+    /// Changed area (local min x, min y, max x, max y) when only part needs
+    /// redrawing; `None` with `render_dirty` means redraw everything.
+    #[serde(skip)]
+    pub render_rect: Option<(i32, i32, i32, i32)>,
     /// Changed since generation: must be kept (and saved) instead of regenerated.
     pub modified: bool,
     /// Cells with active materials: (cell index, layer).
@@ -56,6 +60,7 @@ impl Chunk {
             tile_dirty: vec![true; CHUNK_TILE_COUNT],
             any_tile_dirty: true,
             render_dirty: true,
+            render_rect: None,
             modified: false,
             active: Vec::new(),
             active_flag: vec![0; CHUNK_CELLS],
@@ -67,7 +72,7 @@ impl Chunk {
         self.tiles = vec![TileInfo::default(); CHUNK_TILE_COUNT];
         self.tile_dirty = vec![true; CHUNK_TILE_COUNT];
         self.any_tile_dirty = true;
-        self.render_dirty = true;
+        self.mark_render_all();
         self.active_flag = vec![0; CHUNK_CELLS];
         self.active.clear();
         self.scan_active(content);
@@ -98,7 +103,18 @@ impl Chunk {
         let t = ((ly / TILE) * CHUNK_TILES + lx / TILE) as usize;
         self.tile_dirty[t] = true;
         self.any_tile_dirty = true;
+        if !self.render_dirty {
+            self.render_dirty = true;
+            self.render_rect = Some((lx, ly, lx, ly));
+        } else if let Some(r) = &mut self.render_rect {
+            *r = (r.0.min(lx), r.1.min(ly), r.2.max(lx), r.3.max(ly));
+        }
+    }
+
+    /// Redraw the whole chunk next frame.
+    pub fn mark_render_all(&mut self) {
         self.render_dirty = true;
+        self.render_rect = None;
     }
 
     pub fn rebuild_tiles(&mut self, content: &Content) {
@@ -200,10 +216,10 @@ impl ObjectStore {
 #[derive(Default)]
 pub struct World {
     pub seed: u64,
-    pub chunks: HashMap<ChunkPos, Chunk>,
+    pub chunks: FastMap<ChunkPos, Chunk>,
     pub objects: ObjectStore,
     /// Objects that lost particles this tick and may need to break.
-    pub damaged: HashSet<ObjId>,
+    pub damaged: FastSet<ObjId>,
 }
 
 impl World {

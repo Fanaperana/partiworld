@@ -4,11 +4,13 @@
 pub mod content;
 pub mod coords;
 pub mod defs;
+pub mod fast;
 pub mod registry;
 pub mod rng;
 
 pub use content::*;
 pub use coords::*;
 pub use defs::*;
+pub use fast::*;
 pub use registry::*;
 pub use rng::*;

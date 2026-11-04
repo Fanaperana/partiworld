@@ -11,7 +11,7 @@ use pw_game::Game;
 use pw_world::*;
 use serde::{Deserialize, Serialize};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct Tables {

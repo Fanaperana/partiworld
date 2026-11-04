@@ -11,11 +11,18 @@ use pw_objects as objs;
 use pw_world::*;
 use serde::{Deserialize, Serialize};
 
-pub use path::{find_path, nearest_tile};
+pub use path::{find_nearest, find_path, nearest_tile};
 
 /// Simulation ticks per second at 1x speed.
 pub const TPS: f32 = 30.0;
 const MAX_PATH_NODES: usize = 6000;
+/// Nodes for the "nearest of many targets" search before falling back to A*.
+const NEAR_NODES: usize = 2500;
+/// Most blueprints one supply trip drops materials at.
+const MAX_DROPS: usize = 12;
+/// Work priority: 1 = do first, 4 = do last, 0 = never.
+pub const DEFAULT_WORK: u8 = 3;
+pub const MAX_WORK: u8 = 4;
 
 // ---------------------------------------------------------------- items
 
@@ -156,7 +163,10 @@ pub enum JobKind {
     /// Work a designation (fell, mine, harvest, deconstruct, plant).
     Work { at: TilePos, driver: JobDriver },
     HaulToStockpile { stack: u32, dest: TilePos },
-    HaulToBlueprint { stack: u32, bp: u32, item: usize, count: u32 },
+    /// Pick up one stack and drop it off at several blueprints (stage 1 + i = going to drop i).
+    Supply { stack: u32, item: usize, drops: Vec<(u32, u32)> },
+    /// Put what the pawn already carries in the stockpile.
+    Store { dest: TilePos },
     Construct { bp: u32 },
     Wander { dest: TilePos },
 }
@@ -185,9 +195,25 @@ pub struct Pawn {
     /// Particles gathered toward the next item, per item.
     pub gathered: BTreeMap<usize, u32>,
     pub drafted: bool,
+    /// Work priority per job id (1 = first ... 4 = last, 0 = never). Missing = DEFAULT_WORK.
+    #[serde(default)]
+    pub work: BTreeMap<String, u8>,
 }
 
 impl Pawn {
+    pub fn work_priority(&self, job: &str) -> u8 {
+        self.work.get(job).copied().unwrap_or(DEFAULT_WORK)
+    }
+    /// Cycle 1 -> 2 -> 3 -> 4 -> off -> 1.
+    pub fn cycle_work(&mut self, job: &str) {
+        let p = self.work_priority(job);
+        let n = match p {
+            0 => 1,
+            p if p >= MAX_WORK => 0,
+            p => p + 1,
+        };
+        self.work.insert(job.to_string(), n);
+    }
     pub fn tile(&self) -> TilePos {
         tile_of_f(self.pos.0, self.pos.1)
     }
@@ -235,6 +261,40 @@ fn tags_match(target_tags: &[String], tags: &[String]) -> bool {
 
 fn near(t: TilePos, blocks_center: bool) -> impl Fn(TilePos) -> bool + Copy {
     move |p: TilePos| p.chebyshev(t) <= 1 && !(blocks_center && p == t)
+}
+
+/// Tiles a pawn can stand on to work at `t`.
+fn stand_tiles(t: TilePos, blocks_center: bool) -> impl Iterator<Item = TilePos> {
+    (-1..=1).flat_map(move |dy| (-1..=1).map(move |dx| t.offset(dx, dy))).filter(move |&p| !(blocks_center && p == t))
+}
+
+/// What a construct search can land on.
+#[derive(Clone, Copy)]
+enum BuildCand {
+    Build(u32),
+    Stack(u32),
+}
+
+/// True if a pawn at `start` is not boxed in by walls plus `blocked` tiles
+/// (unbuilt walls). Used so builders stand outside the room they are closing.
+fn open_area(world: &World, blocked: &BTreeSet<TilePos>, start: TilePos, limit: usize) -> bool {
+    let mut seen = BTreeSet::from([start]);
+    let mut queue = std::collections::VecDeque::from([start]);
+    while let Some(t) = queue.pop_front() {
+        if seen.len() >= limit {
+            return true;
+        }
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let n = t.offset(dx, dy);
+            if world.chunk(n.chunk()).is_none() {
+                return true; // reaches unloaded land: open
+            }
+            if world.walkable(n) && !blocked.contains(&n) && seen.insert(n) {
+                queue.push_back(n);
+            }
+        }
+    }
+    false
 }
 
 impl Colony {
@@ -472,9 +532,17 @@ impl Colony {
                 return;
             }
             pawn.think = 15;
-            pawn.job = self.find_job(pawn, ctx);
+            // Put away anything still in hand before taking new work.
+            if pawn.carrying.is_some() {
+                pawn.job = self.find_store(pawn, ctx);
+                if pawn.job.is_none() {
+                    self.drop_carried(pawn, ctx);
+                }
+            }
             if pawn.job.is_none() {
-                self.drop_carried(pawn, ctx);
+                pawn.job = self.find_job(pawn, ctx);
+            }
+            if pawn.job.is_none() {
                 if ctx.rng.chance(0.08) {
                     let start = pawn.tile();
                     let dx = ctx.rng.range_i32(-5, 5);
@@ -506,16 +574,15 @@ impl Colony {
                     }
                 }
                 JobKind::HaulToStockpile { stack, .. } => self.unreserve_stack(stack, pawn.id),
-                JobKind::HaulToBlueprint { stack, bp, item, count } => {
+                JobKind::Supply { stack, item, drops } => {
                     self.unreserve_stack(stack, pawn.id);
-                    if job.stage < 3 {
-                        if let Some(b) = self.blueprints.get_mut(&bp) {
-                            if let Some(i) = ctx.content.protos[b.def].build.as_ref().and_then(|bd| bd.cost.iter().position(|c| c.0 == item)) {
-                                b.incoming[i] = b.incoming[i].saturating_sub(count);
-                            }
-                        }
+                    // Drops not made yet no longer count as incoming.
+                    let first = (job.stage as usize).saturating_sub(1);
+                    for &(bp, n) in drops.iter().skip(first) {
+                        self.uncount_incoming(ctx.content, bp, item, n);
                     }
                 }
+                JobKind::Store { .. } => {}
                 JobKind::Construct { bp } => {
                     if let Some(b) = self.blueprints.get_mut(&bp) {
                         if b.reserved == Some(pawn.id) {
@@ -527,8 +594,20 @@ impl Colony {
             }
         }
         pawn.path.clear();
-        self.drop_carried(pawn, ctx);
+        // Anything still carried is stored (or dropped) on the next think.
         pawn.think = 0;
+    }
+
+    fn cost_index(content: &Content, def: usize, item: usize) -> Option<usize> {
+        content.protos[def].build.as_ref().and_then(|b| b.cost.iter().position(|c| c.0 == item))
+    }
+
+    fn uncount_incoming(&mut self, content: &Content, bp: u32, item: usize, n: u32) {
+        if let Some(b) = self.blueprints.get_mut(&bp) {
+            if let Some(i) = Self::cost_index(content, b.def, item) {
+                b.incoming[i] = b.incoming[i].saturating_sub(n);
+            }
+        }
     }
 
     fn unreserve_stack(&mut self, id: u32, pawn: u32) {
@@ -585,12 +664,46 @@ impl Colony {
 
     // ------------------------------------------------------------ job search
 
+    /// Search once for the nearest of many goals (stand tile -> value) and set the path.
+    /// Falls back to an A* aimed at `hint` when nothing is close.
+    fn search<T: Copy>(
+        pawn: &mut Pawn,
+        ctx: &Ctx,
+        goals: &HashMap<TilePos, T>,
+        ok: impl Fn(TilePos, T) -> bool,
+        hint: TilePos,
+    ) -> Option<T> {
+        if goals.is_empty() {
+            return None;
+        }
+        let w = &*ctx.world;
+        let here = pawn.tile();
+        let goal = |t: TilePos| goals.get(&t).copied().filter(|&v| ok(t, v));
+        if let Some((v, p)) = find_nearest(w, here, goal, NEAR_NODES) {
+            pawn.path = p;
+            return Some(v);
+        }
+        let p = find_path(w, here, |t| goal(t).is_some(), hint, MAX_PATH_NODES)?;
+        let v = goal(p.first().copied().unwrap_or(here))?;
+        pawn.path = p;
+        Some(v)
+    }
+
     fn find_job(&mut self, pawn: &mut Pawn, ctx: &mut Ctx) -> Option<Job> {
         if pawn.drafted {
             return None;
         }
         let here = pawn.tile();
-        for ji in ctx.content.jobs_by_priority() {
+        // The pawn's own priorities first, then the job's global priority (stable sort).
+        let mut order: Vec<(u8, usize)> = ctx
+            .content
+            .jobs_by_priority()
+            .into_iter()
+            .map(|ji| (pawn.work_priority(&ctx.content.jobs.by_idx(ji).id), ji))
+            .filter(|(p, _)| *p > 0)
+            .collect();
+        order.sort_by_key(|x| x.0);
+        for (_, ji) in order {
             let jd = ctx.content.jobs.by_idx(ji);
             let found = match jd.driver {
                 JobDriver::Haul => self.find_haul(pawn, ctx, here),
@@ -606,105 +719,176 @@ impl Colony {
 
     fn find_designation(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, job: usize, here: TilePos) -> Option<Job> {
         let jd = ctx.content.jobs.by_idx(job);
-        let mut cands: Vec<(i32, TilePos)> = self
-            .designations
-            .iter()
-            .filter(|(_, d)| d.job == job && d.reserved.is_none())
-            .map(|(t, _)| (t.manhattan(here), *t))
-            .collect();
-        cands.sort();
-        for (_, t) in cands.into_iter().take(6) {
-            let blocks = match &self.designations[&t].target {
+        let mut goals: HashMap<TilePos, TilePos> = HashMap::new();
+        let mut hint: Option<(i32, TilePos)> = None;
+        for (t, d) in &self.designations {
+            if d.job != job || d.reserved.is_some() {
+                continue;
+            }
+            let blocks = match &d.target {
                 DesTarget::Object(o) => ctx.world.objects.get(*o).is_some_and(|i| ctx.content.protos[i.def].blocks),
                 DesTarget::Tile => true,
                 DesTarget::Plant(_) => false,
             };
-            if Self::path_to(pawn, ctx, near(t, blocks), t) {
-                self.designations.get_mut(&t).unwrap().reserved = Some(pawn.id);
-                return Some(Job { kind: JobKind::Work { at: t, driver: jd.driver }, stage: 0, timer: 0.0, label: jd.label.clone() });
+            for s in stand_tiles(*t, blocks) {
+                goals.entry(s).or_insert(*t);
+            }
+            let dist = t.manhattan(here);
+            if hint.is_none_or(|h| dist < h.0) {
+                hint = Some((dist, *t));
             }
         }
-        None
+        let t = Self::search(pawn, ctx, &goals, |_, _| true, hint?.1)?;
+        self.designations.get_mut(&t).unwrap().reserved = Some(pawn.id);
+        Some(Job { kind: JobKind::Work { at: t, driver: jd.driver }, stage: 0, timer: 0.0, label: jd.label.clone() })
     }
 
+    /// Builders either build a blueprint that has its materials, or bring
+    /// materials to blueprints (one trip can supply several).
     fn find_construct(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, here: TilePos) -> Option<Job> {
-        let mut cands: Vec<(i32, u32)> = self
-            .blueprints
-            .values()
-            .filter(|b| b.reserved.is_none() && b.ready(ctx.content))
-            .map(|b| (b.tile.manhattan(here), b.id))
-            .collect();
-        cands.sort();
-        for (_, id) in cands.into_iter().take(6) {
-            let (tile, blocks) = {
-                let b = &self.blueprints[&id];
-                (b.tile, ctx.content.protos[b.def].blocks)
-            };
-            if Self::path_to(pawn, ctx, near(tile, blocks), tile) {
-                self.blueprints.get_mut(&id).unwrap().reserved = Some(pawn.id);
-                let name = ctx.content.objects.by_idx(self.blueprints[&id].def).name.clone();
-                return Some(Job { kind: JobKind::Construct { bp: id }, stage: 0, timer: 0.0, label: format!("Building {name}") });
+        let mut goals: HashMap<TilePos, BuildCand> = HashMap::new();
+        let mut hint: Option<(i32, TilePos)> = None;
+        let mut needed: BTreeSet<usize> = BTreeSet::new();
+        // Unbuilt walls, so builders do not close themselves in.
+        let walls: BTreeSet<TilePos> =
+            self.blueprints.values().filter(|b| ctx.content.protos[b.def].blocks).map(|b| b.tile).collect();
+        for b in self.blueprints.values() {
+            for (item, _) in b.needs(ctx.content) {
+                needed.insert(item);
+            }
+            if b.reserved.is_some() || !b.ready(ctx.content) {
+                continue;
+            }
+            let blocks = ctx.content.protos[b.def].blocks;
+            for s in stand_tiles(b.tile, blocks) {
+                if !walls.contains(&s) {
+                    goals.entry(s).or_insert(BuildCand::Build(b.id));
+                }
+            }
+            let d = b.tile.manhattan(here);
+            if hint.is_none_or(|h| d < h.0) {
+                hint = Some((d, b.tile));
             }
         }
-        None
-    }
-
-    fn nearest_stack(&self, here: TilePos, item: Option<usize>, skip_stockpiled: bool) -> Vec<u32> {
-        let mut v: Vec<(i32, u32)> = self
-            .items
-            .stacks
-            .values()
-            .filter(|s| s.reserved.is_none() && item.is_none_or(|i| s.item == i))
-            .filter(|s| !skip_stockpiled || !self.stockpile.contains(&s.tile))
-            .map(|s| (s.tile.manhattan(here), s.id))
-            .collect();
-        v.sort();
-        v.into_iter().map(|x| x.1).take(6).collect()
-    }
-
-    fn find_haul(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, here: TilePos) -> Option<Job> {
-        // 1. Materials for blueprints.
-        let mut bps: Vec<(i32, u32)> = self.blueprints.values().map(|b| (b.tile.manhattan(here), b.id)).collect();
-        bps.sort();
-        for (_, bp) in bps.into_iter().take(8) {
-            let needs = self.blueprints[&bp].needs(ctx.content);
-            for (item, need) in needs {
-                for sid in self.nearest_stack(here, Some(item), false) {
-                    let tile = self.items.stacks[&sid].tile;
-                    if Self::path_to(pawn, ctx, move |t| t == tile, tile) {
-                        let count = need.min(self.items.stacks[&sid].count);
-                        self.items.stacks.get_mut(&sid).unwrap().reserved = Some(pawn.id);
-                        let b = self.blueprints.get_mut(&bp).unwrap();
-                        let ci = ctx.content.protos[b.def].build.as_ref().unwrap().cost.iter().position(|c| c.0 == item).unwrap();
-                        b.incoming[ci] += count;
-                        let name = ctx.content.items.by_idx(item).name.clone();
-                        return Some(Job {
-                            kind: JobKind::HaulToBlueprint { stack: sid, bp, item, count },
-                            stage: 0,
-                            timer: 0.0,
-                            label: format!("Hauling {name} to build"),
-                        });
-                    }
+        for s in self.items.stacks.values() {
+            if s.reserved.is_none() && needed.contains(&s.item) {
+                goals.insert(s.tile, BuildCand::Stack(s.id));
+                let d = s.tile.manhattan(here);
+                if hint.is_none_or(|h| d < h.0) {
+                    hint = Some((d, s.tile));
                 }
             }
         }
-        // 2. Loose items to stockpiles.
+        let hint = hint?.1;
+        let world = &*ctx.world;
+        let blueprints = &self.blueprints;
+        let content = ctx.content;
+        let open = std::cell::RefCell::new(HashMap::<TilePos, bool>::new());
+        let ok = |t: TilePos, c: BuildCand| match c {
+            BuildCand::Stack(_) => true,
+            BuildCand::Build(id) => {
+                // For walls: stand where you are not shut in.
+                let blocks = blueprints.get(&id).is_some_and(|b| content.protos[b.def].blocks);
+                !blocks || *open.borrow_mut().entry(t).or_insert_with(|| open_area(world, &walls, t, 120))
+            }
+        };
+        let found = Self::search(pawn, ctx, &goals, ok, hint)?;
+        match found {
+            BuildCand::Build(id) => {
+                self.blueprints.get_mut(&id).unwrap().reserved = Some(pawn.id);
+                let name = ctx.content.objects.by_idx(self.blueprints[&id].def).name.clone();
+                Some(Job { kind: JobKind::Construct { bp: id }, stage: 0, timer: 0.0, label: format!("Building {name}") })
+            }
+            BuildCand::Stack(sid) => self.plan_supply(pawn, ctx, sid),
+        }
+    }
+
+    /// Choose which blueprints one load from `sid` goes to, and reserve it all.
+    fn plan_supply(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, sid: u32) -> Option<Job> {
+        let s = self.items.stacks.get(&sid)?.clone();
+        let cap = s.count.min(ctx.content.item_rt[s.item].stack.max(1));
+        let mut wants: Vec<(TilePos, u32, u32)> = self
+            .blueprints
+            .values()
+            .filter_map(|b| b.needs(ctx.content).into_iter().find(|n| n.0 == s.item).map(|n| (b.tile, b.id, n.1)))
+            .collect();
+        // Nearest blueprint to the stack first, then the ones closest to that one.
+        let Some(first) = wants.iter().min_by_key(|w| w.0.manhattan(s.tile)).map(|w| w.0) else {
+            pawn.path.clear();
+            return None;
+        };
+        wants.sort_by_key(|w| (w.0.manhattan(first), w.1));
+        let mut drops = Vec::new();
+        let mut total = 0;
+        for (t, bp, need) in wants {
+            if total >= cap || drops.len() >= MAX_DROPS || t.manhattan(first) > 16 {
+                break;
+            }
+            let n = need.min(cap - total);
+            total += n;
+            drops.push((bp, n));
+        }
+        for &(bp, n) in &drops {
+            let b = self.blueprints.get_mut(&bp).unwrap();
+            let i = Self::cost_index(ctx.content, b.def, s.item).unwrap();
+            b.incoming[i] += n;
+        }
+        self.items.stacks.get_mut(&sid).unwrap().reserved = Some(pawn.id);
+        let name = ctx.content.items.by_idx(s.item).name.clone();
+        Some(Job {
+            kind: JobKind::Supply { stack: sid, item: s.item, drops },
+            stage: 0,
+            timer: 0.0,
+            label: format!("Hauling {name} to build"),
+        })
+    }
+
+    /// Put carried items into the stockpile.
+    fn find_store(&mut self, pawn: &mut Pawn, ctx: &mut Ctx) -> Option<Job> {
+        let (item, _) = pawn.carrying?;
+        let here = pawn.tile();
+        if self.stockpile.contains(&here) {
+            return None; // already in the stockpile: dropping here is fine
+        }
+        let dest = self.free_stockpile_tile(ctx, item, here)?;
+        if !Self::path_to(pawn, ctx, move |t| t == dest, dest) {
+            return None;
+        }
+        let name = ctx.content.items.by_idx(item).name.clone();
+        Some(Job { kind: JobKind::Store { dest }, stage: 0, timer: 0.0, label: format!("Storing {name}") })
+    }
+
+    /// Loose items to stockpiles.
+    fn find_haul(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, here: TilePos) -> Option<Job> {
         if self.stockpile.is_empty() {
             return None;
         }
-        for sid in self.nearest_stack(here, None, true) {
-            let (item, tile) = {
-                let s = &self.items.stacks[&sid];
-                (s.item, s.tile)
-            };
-            let Some(dest) = self.free_stockpile_tile(ctx, item, tile) else { continue };
-            if Self::path_to(pawn, ctx, move |t| t == tile, tile) {
-                self.items.stacks.get_mut(&sid).unwrap().reserved = Some(pawn.id);
-                let name = ctx.content.items.by_idx(item).name.clone();
-                return Some(Job { kind: JobKind::HaulToStockpile { stack: sid, dest }, stage: 0, timer: 0.0, label: format!("Hauling {name}") });
+        let mut goals: HashMap<TilePos, u32> = HashMap::new();
+        let mut hint: Option<(i32, TilePos)> = None;
+        for s in self.items.stacks.values() {
+            if s.reserved.is_none() && !self.stockpile.contains(&s.tile) {
+                goals.insert(s.tile, s.id);
+                let d = s.tile.manhattan(here);
+                if hint.is_none_or(|h| d < h.0) {
+                    hint = Some((d, s.tile));
+                }
             }
         }
-        None
+        let hint = hint?.1;
+        // Only stacks that have somewhere to go.
+        let has_room = |_: TilePos, sid: u32| {
+            let s = &self.items.stacks[&sid];
+            self.free_stockpile_tile(ctx, s.item, s.tile).is_some()
+        };
+        let sid = Self::search(pawn, ctx, &goals, has_room, hint)?;
+        let (item, tile) = {
+            let s = &self.items.stacks[&sid];
+            (s.item, s.tile)
+        };
+        let dest = self.free_stockpile_tile(ctx, item, tile)?;
+        self.items.stacks.get_mut(&sid).unwrap().reserved = Some(pawn.id);
+        let name = ctx.content.items.by_idx(item).name.clone();
+        Some(Job { kind: JobKind::HaulToStockpile { stack: sid, dest }, stage: 0, timer: 0.0, label: format!("Hauling {name}") })
     }
 
     fn free_stockpile_tile(&self, ctx: &Ctx, item: usize, from: TilePos) -> Option<TilePos> {
@@ -761,8 +945,17 @@ impl Colony {
             },
             JobKind::Work { at, driver } => self.run_work(pawn, ctx, *at, *driver, job.stage),
             JobKind::HaulToStockpile { stack, dest } => self.run_haul_stockpile(pawn, ctx, *stack, *dest, job.stage),
-            JobKind::HaulToBlueprint { stack, bp, item, count } => {
-                self.run_haul_bp(pawn, ctx, *stack, *bp, *item, *count, job.stage)
+            JobKind::Supply { stack, item, drops } => self.run_supply(pawn, ctx, *stack, *item, drops, job.stage),
+            JobKind::Store { dest } => {
+                let dest = *dest;
+                match Self::follow(pawn, ctx, move |t| t == dest, dest) {
+                    Ok(true) => {
+                        self.drop_carried(pawn, ctx);
+                        Step::Done
+                    }
+                    Ok(false) => Step::Continue,
+                    Err(()) => Step::Fail("no path"),
+                }
             }
             JobKind::Construct { bp } => self.run_construct(pawn, ctx, *bp, job.stage),
         };
@@ -992,46 +1185,72 @@ impl Colony {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn run_haul_bp(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, stack: u32, bp: u32, item: usize, count: u32, stage: u8) -> Step {
-        let Some(b) = self.blueprints.get(&bp) else { return Step::Fail("blueprint gone") };
-        let (bt, blocks) = (b.tile, ctx.content.protos[b.def].blocks);
-        match stage {
-            0 => {
-                let Some(s) = self.items.get(stack) else { return Step::Fail("items gone") };
-                let tile = s.tile;
-                match Self::follow(pawn, ctx, move |t| t == tile, tile) {
-                    Ok(true) => {
-                        let got = self.items.take(stack, count);
-                        self.unreserve_stack(stack, pawn.id);
-                        if got == 0 {
-                            return Step::Fail("nothing to carry");
-                        }
-                        pawn.carrying = Some((item, got));
-                        if !Self::path_to(pawn, ctx, near(bt, blocks), bt) {
-                            return Step::Fail("no path to blueprint");
-                        }
-                        self.set_stage(pawn, 1);
-                        Step::Continue
-                    }
-                    Ok(false) => Step::Continue,
-                    Err(()) => Step::Fail("no path"),
-                }
-            }
-            _ => match Self::follow(pawn, ctx, near(bt, blocks), bt) {
+    fn run_supply(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, stack: u32, item: usize, drops: &[(u32, u32)], stage: u8) -> Step {
+        if stage == 0 {
+            let Some(s) = self.items.get(stack) else { return Step::Fail("items gone") };
+            let tile = s.tile;
+            return match Self::follow(pawn, ctx, move |t| t == tile, tile) {
                 Ok(true) => {
-                    let b = self.blueprints.get_mut(&bp).unwrap();
-                    let ci = ctx.content.protos[b.def].build.as_ref().unwrap().cost.iter().position(|c| c.0 == item).unwrap();
-                    let (it, n) = pawn.carrying.take().unwrap_or((item, 0));
-                    b.delivered[ci] += n;
-                    b.incoming[ci] = b.incoming[ci].saturating_sub(count);
-                    let _ = it;
-                    self.set_stage(pawn, 3);
-                    Step::Done
+                    let want: u32 = drops.iter().map(|d| d.1).sum();
+                    let got = self.items.take(stack, want);
+                    self.unreserve_stack(stack, pawn.id);
+                    if got == 0 {
+                        return Step::Fail("nothing to carry");
+                    }
+                    // Got less than planned: give up the last drops.
+                    let mut left = got;
+                    let mut keep = Vec::new();
+                    for &(bp, n) in drops {
+                        let give = n.min(left);
+                        left -= give;
+                        if give < n {
+                            self.uncount_incoming(ctx.content, bp, item, n - give);
+                        }
+                        keep.push((bp, give));
+                    }
+                    if let Some(Job { kind: JobKind::Supply { drops, .. }, .. }) = &mut pawn.job {
+                        *drops = keep;
+                    }
+                    pawn.carrying = Some((item, got));
+                    pawn.path.clear();
+                    self.set_stage(pawn, 1);
+                    Step::Continue
                 }
                 Ok(false) => Step::Continue,
                 Err(()) => Step::Fail("no path"),
-            },
+            };
+        }
+        let i = stage as usize - 1;
+        let Some(&(bp, n)) = drops.get(i) else { return Step::Done };
+        let last = i + 1 >= drops.len();
+        let next = |this: &mut Self, pawn: &mut Pawn| {
+            pawn.path.clear();
+            this.set_stage(pawn, stage + 1);
+            if last { Step::Done } else { Step::Continue }
+        };
+        if n == 0 {
+            return next(self, pawn);
+        }
+        let Some(b) = self.blueprints.get(&bp) else { return next(self, pawn) };
+        let (bt, blocks) = (b.tile, ctx.content.protos[b.def].blocks);
+        match Self::follow(pawn, ctx, near(bt, blocks), bt) {
+            Ok(true) => {
+                let have = pawn.carrying.map(|c| c.1).unwrap_or(0);
+                let give = n.min(have);
+                let b = self.blueprints.get_mut(&bp).unwrap();
+                if let Some(ci) = Self::cost_index(ctx.content, b.def, item) {
+                    b.delivered[ci] += give;
+                    b.incoming[ci] = b.incoming[ci].saturating_sub(n);
+                }
+                pawn.carrying = if have > give { Some((item, have - give)) } else { None };
+                next(self, pawn)
+            }
+            Ok(false) => Step::Continue,
+            Err(()) => {
+                // Cannot reach this one: skip it.
+                self.uncount_incoming(ctx.content, bp, item, n);
+                next(self, pawn)
+            }
         }
     }
 

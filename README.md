@@ -20,6 +20,8 @@ The number is the world seed (optional).
 | R | Hide canopies and roofs |
 | F5 / F9 | Quick save / load (`saves/quicksave.pws`) |
 
+Each colonist has work priorities (Info panel > **Work priorities**): 1 = do first, 4 = do last, blank = never. Builders carry a full load of materials and drop it at several blueprints in one trip, and stand outside the room they are walling in.
+
 Tools (left panel): **Orders** (chop, cut, harvest, mine, break rocks, deconstruct), **Zones** (stockpiles), **Build** (walls drag as a room outline), **Plant** (saplings grow into trees), **God powers** (paint any material, drop any object, start fires, add colonists) and the **Object editor**.
 
 ## How it is built
@@ -72,5 +74,7 @@ cargo test --workspace
 ```
 
 Covers mod loading and patching, dependency sorting, deterministic world generation, objects across chunk borders, pathfinding, chopping, harvesting, mining, building, hauling, fire, growth, scripts, and save/load.
+
+`cargo test --release -p pw_game --test game bench -- --ignored --nocapture` times a busy colony (ms per tick).
 
 `PW_AUTOSHOT=shot.png cargo run` runs a short scripted session, saves a screenshot and quits.

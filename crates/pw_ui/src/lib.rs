@@ -49,6 +49,7 @@ pub struct UiState {
     pub seed_text: String,
     pub show_editor: bool,
     pub show_help: bool,
+    pub show_work: bool,
     pub editor: Editor,
     pub toast: Option<(String, f32)>,
     pub save_path: PathBuf,
@@ -67,6 +68,7 @@ impl Default for UiState {
             seed_text: String::new(),
             show_editor: false,
             show_help: true,
+            show_work: false,
             editor: Editor::default(),
             toast: None,
             save_path: PathBuf::from("saves/quicksave.pws"),
@@ -338,6 +340,42 @@ fn tool_button(ui: &mut egui::Ui, state: &mut UiState, tool: Tool, label: &str) 
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Colonists x jobs. Click a cell to cycle 1 (first) .. 4 (last) .. off.
+fn work_grid(ui: &mut egui::Ui, g: &mut Game) {
+    ui.label(egui::RichText::new("Click to change: 1 = do first, 4 = do last, blank = never.").weak());
+    let content = g.content.clone();
+    let jobs: Vec<usize> = content.jobs_by_priority();
+    egui::Grid::new("work_grid").striped(true).spacing([6.0, 4.0]).show(ui, |ui| {
+        ui.label("");
+        for &j in &jobs {
+            let jd = content.jobs.by_idx(j);
+            // Column headers: short label, full label on hover.
+            let short: String = jd.label.split_whitespace().next().unwrap_or("").chars().take(9).collect();
+            ui.label(egui::RichText::new(short).small()).on_hover_text(&jd.label);
+        }
+        ui.end_row();
+        for p in &mut g.colony.pawns {
+            ui.label(&p.name);
+            for &j in &jobs {
+                let id = &content.jobs.by_idx(j).id;
+                let v = p.work_priority(id);
+                let (text, color) = match v {
+                    0 => ("  ".to_string(), egui::Color32::GRAY),
+                    1 => ("1".into(), egui::Color32::from_rgb(120, 230, 120)),
+                    2 => ("2".into(), egui::Color32::from_rgb(200, 220, 120)),
+                    3 => ("3".into(), egui::Color32::from_rgb(220, 200, 150)),
+                    n => (n.to_string(), egui::Color32::from_rgb(170, 160, 150)),
+                };
+                let b = egui::Button::new(egui::RichText::new(text).color(color).strong()).min_size(egui::vec2(28.0, 20.0));
+                if ui.add(b).clicked() {
+                    p.cycle_work(id);
+                }
+            }
+            ui.end_row();
+        }
+    });
+}
+
 fn ui_panels(
     mut contexts: EguiContexts,
     mut ui_state: ResMut<UiState>,
@@ -514,7 +552,12 @@ fn ui_panels(
                 }
             }
             ui.separator();
-            ui.strong("Colonists");
+            ui.horizontal(|ui| {
+                ui.strong("Colonists");
+                if ui.small_button("Work priorities").clicked() {
+                    st.show_work = !st.show_work;
+                }
+            });
             let mut focus = None;
             for p in &g.colony.pawns {
                 ui.horizontal(|ui| {
@@ -568,6 +611,14 @@ fn ui_panels(
             ui.label("Right click or Esc: back to Inspect. R: hide canopies and roofs.");
             ui.label("F5 save, F9 load. Object editor: paint your own trees, houses and props.");
         });
+    }
+
+    if st.show_work {
+        let mut open = true;
+        egui::Window::new("Work priorities").open(&mut open).resizable(false).default_pos([260.0, 120.0]).show(&ctx, |ui| {
+            work_grid(ui, g);
+        });
+        st.show_work = open;
     }
 
     if st.show_editor {
