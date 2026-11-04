@@ -171,3 +171,12 @@ Tools for testing:
 ## Roadmap
 
 Next on the list: colonist needs (food, sleep, warmth), crafting, farming zones, flowing water, animals.
+
+## License
+
+Dual-licensed under either of
+
+- [MIT license](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+at your option. Unless you say otherwise, any contribution you submit is dual-licensed the same way.
