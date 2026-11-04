@@ -147,7 +147,11 @@ struct Views {
     shadow_img: Option<Handle<Image>>,
     /// Wild creature id -> (sprite entity, image key).
     animals: HashMap<u32, (Entity, (usize, u8, u8))>,
-    animal_images: HashMap<(usize, u8, u8), Handle<Image>>,
+    animal_images: HashMap<(usize, u8, u8), Vec<Handle<Image>>>,
+    /// A person's sprite frames, one per drawn facing.
+    pawn_frames: HashMap<u64, Vec<Handle<Image>>>,
+    /// Which way each person (pawn key) and animal (id | ANIMAL_BIT) last faced.
+    facing: HashMap<u64, usize>,
     items: HashMap<u64, (Entity, usize, TilePos)>,
     blueprints: HashMap<u32, Entity>,
     item_images: HashMap<usize, Handle<Image>>,
@@ -759,6 +763,41 @@ fn sprite_image(images: &mut Assets<Image>, s: &SpriteRt, slots: &std::collectio
     images.add(img)
 }
 
+/// Images for every drawn facing of a sprite (frame 0 is the front view).
+fn sprite_frames(images: &mut Assets<Image>, s: &SpriteRt, slots: &std::collections::BTreeMap<String, String>) -> Vec<Handle<Image>> {
+    std::iter::once(s).chain(&s.views).map(|f| sprite_image(images, f, slots, f.outline)).collect()
+}
+
+/// Marks animal keys in `Views::facing` so they never clash with pawn keys.
+const ANIMAL_BIT: u64 = 1 << 63;
+
+/// Turn a creature to face the way it last moved (between its last two
+/// tick positions); standing still keeps the old facing.
+fn turn(facing: &mut HashMap<u64, usize>, key: u64, prev: Option<&(f32, f32)>, pos: (f32, f32)) -> usize {
+    let f = facing.entry(key).or_insert(0);
+    if let Some(&(x, y)) = prev {
+        let (dx, dy) = (pos.0 - x, pos.1 - y);
+        // Ignore tiny shuffles and teleports.
+        if dx * dx + dy * dy > 0.0004 && dx * dx + dy * dy < (TILE * TILE * 4) as f32 {
+            *f = facing_of(dx, dy);
+        }
+    }
+    *f
+}
+
+/// Show the frame for a facing on a sprite, mirrored for west-facing views.
+fn show_facing(sprite: &mut Sprite, frames: &[Handle<Image>], s: &SpriteRt, facing: usize) {
+    let (frame, flip) = s.facing[facing];
+    if let Some(img) = frames.get(frame as usize) {
+        if sprite.image != *img {
+            sprite.image = img.clone();
+        }
+    }
+    if sprite.flip_x != flip {
+        sprite.flip_x = flip;
+    }
+}
+
 /// Soft oval shadow under colonists.
 fn shadow_image(images: &mut Assets<Image>) -> Handle<Image> {
     let (w, h) = (10u32, 5u32);
@@ -782,7 +821,7 @@ fn item_image(views: &mut Views, images: &mut Assets<Image>, content: &Content, 
     views
         .item_images
         .entry(item)
-        .or_insert_with(|| sprite_image(images, &content.item_rt[item].sprite, &Default::default(), true))
+        .or_insert_with(|| sprite_image(images, &content.item_rt[item].sprite, &Default::default(), content.item_rt[item].sprite.outline))
         .clone()
 }
 
@@ -882,7 +921,7 @@ fn sync_pawns(
     mut views: ResMut<Views>,
     mut images: ResMut<Assets<Image>>,
     mut carry: Query<(&mut Sprite, &mut Visibility, &mut Transform), (With<CarrySprite>, Without<PawnSprite>)>,
-    mut bodies: Query<&mut Transform, (With<PawnSprite>, Without<CarrySprite>, Without<ShadowSprite>)>,
+    mut bodies: Query<(&mut Transform, &mut Sprite), (With<PawnSprite>, Without<CarrySprite>, Without<ShadowSprite>)>,
     mut shadows: Query<&mut Transform, (With<ShadowSprite>, Without<CarrySprite>, Without<PawnSprite>)>,
     clock: Res<SimClock>,
 ) {
@@ -891,6 +930,8 @@ fn sync_pawns(
     let gone: Vec<u64> = views.pawns.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
         let (a, b, sh) = views.pawns.remove(&id).unwrap();
+        views.pawn_frames.remove(&id);
+        views.facing.remove(&id);
         commands.entity(a).despawn();
         commands.entity(b).despawn();
         commands.entity(sh).despawn();
@@ -898,6 +939,8 @@ fn sync_pawns(
     for (owner, p) in g.all_pawns() {
         let key = pawn_key(owner, p.id);
         let d = clock.draw_pos_of(owner, p);
+        let spr = &g.content.creature_rt[p.creature].sprite;
+        let face = turn(&mut views.facing, key, clock.prev.get(&key), p.pos);
         let pos = Transform::from_xyz(d.x, d.y, 10.0);
         let carry_pos = Transform::from_xyz(d.x + 3.0, d.y + 4.0, 11.0);
         // Shadow under the feet: sprites are centred, so drop by half the height.
@@ -905,8 +948,11 @@ fn sync_pawns(
         let shadow_pos = Transform::from_xyz(d.x + 0.5, d.y - feet + 0.5, 9.0);
         match views.pawns.get(&key) {
             Some(&(e, c, sh)) => {
-                if let Ok(mut t) = bodies.get_mut(e) {
+                if let Ok((mut t, mut s)) = bodies.get_mut(e) {
                     t.translation = pos.translation;
+                    if let Some(frames) = views.pawn_frames.get(&key) {
+                        show_facing(&mut s, frames, spr, face);
+                    }
                 }
                 if let Ok(mut t) = shadows.get_mut(sh) {
                     t.translation = shadow_pos.translation;
@@ -928,8 +974,11 @@ fn sync_pawns(
                 }
             }
             None => {
-                let img = sprite_image(&mut images, &g.content.creature_rt[p.creature].sprite, &p.slots, true);
-                let e = commands.spawn((Sprite::from_image(img), pos, PawnSprite)).id();
+                let frames = sprite_frames(&mut images, spr, &p.slots);
+                let mut body = Sprite::from_image(frames[0].clone());
+                show_facing(&mut body, &frames, spr, face);
+                views.pawn_frames.insert(key, frames);
+                let e = commands.spawn((body, pos, PawnSprite)).id();
                 let c = commands
                     .spawn((Sprite::default(), carry_pos, Visibility::Hidden, CarrySprite))
                     .id();
@@ -967,7 +1016,7 @@ fn sync_animals(
     game: Res<GameRes>,
     mut views: ResMut<Views>,
     mut images: ResMut<Assets<Image>>,
-    mut q: Query<&mut Transform, With<AnimalSprite>>,
+    mut q: Query<(&mut Transform, &mut Sprite), With<AnimalSprite>>,
     clock: Res<SimClock>,
 ) {
     let g = &game.0;
@@ -975,6 +1024,7 @@ fn sync_animals(
     let gone: Vec<u32> = views.animals.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
         let (e, _) = views.animals.remove(&id).unwrap();
+        views.facing.remove(&(id as u64 | ANIMAL_BIT));
         commands.entity(e).despawn();
     }
     for c in &g.life.creatures {
@@ -985,19 +1035,24 @@ fn sync_animals(
         let hue = ((c.genes[pw_life::G_HUE] - 1.0) * 6.0).round().clamp(-6.0, 6.0) as i8;
         let key = (c.def, pick as u8, (hue + 6) as u8);
         let at = clock.draw_pos_life(c);
+        let spr = &g.content.creature_rt[c.def].sprite;
+        let face = turn(&mut views.facing, c.id as u64 | ANIMAL_BIT, clock.prev_life.get(&c.id), c.pos);
         let scale = (c.genes[pw_life::G_SIZE] * if c.age < 2 * pw_game::DAY_TICKS { 0.75 } else { 1.0 }).clamp(0.5, 2.0);
         let t = Transform::from_xyz(at.x, at.y, 9.5).with_scale(Vec3::splat(scale));
         match views.animals.get(&c.id) {
             Some(&(e, k)) if k == key => {
-                if let Ok(mut tr) = q.get_mut(e) {
+                if let Ok((mut tr, mut s)) = q.get_mut(e) {
                     *tr = t;
+                    if let Some(frames) = views.animal_images.get(&key) {
+                        show_facing(&mut s, frames, spr, face);
+                    }
                 }
             }
             other => {
                 if let Some(&(e, _)) = other {
                     commands.entity(e).despawn();
                 }
-                let img = match views.animal_images.get(&key) {
+                let frames = match views.animal_images.get(&key) {
                     Some(h) => h.clone(),
                     None => {
                         let slots: std::collections::BTreeMap<String, String> = def
@@ -1009,7 +1064,7 @@ fn sync_animals(
                                 (k.clone(), format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]))
                             })
                             .collect();
-                        let h = sprite_image(&mut images, &g.content.creature_rt[c.def].sprite, &slots, true);
+                        let h = sprite_frames(&mut images, spr, &slots);
                         views.animal_images.insert(key, h.clone());
                         h
                     }
@@ -1023,10 +1078,11 @@ fn sync_animals(
                     }
                 };
                 // Ground shadow as a child, so it follows and scales with the animal.
-                let spr = &g.content.creature_rt[c.def].sprite;
                 let sh = Transform::from_xyz(0.5, -(spr.h as f32) * 0.5 + 0.5, -0.5)
                     .with_scale(Vec3::new((spr.w as f32 + 2.0) / 10.0, 1.0, 1.0));
-                let e = commands.spawn((Sprite::from_image(img), t, AnimalSprite, children![(Sprite::from_image(shadow), sh)])).id();
+                let mut body = Sprite::from_image(frames[0].clone());
+                show_facing(&mut body, &frames, spr, face);
+                let e = commands.spawn((body, t, AnimalSprite, children![(Sprite::from_image(shadow), sh)])).id();
                 views.animals.insert(c.id, (e, key));
             }
         }

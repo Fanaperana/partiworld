@@ -266,28 +266,79 @@ pub struct SpriteRt {
     /// Row-major, top row first. Slot pixels hold the slot index in `slots` until filled.
     pub pixels: Vec<[u8; 4]>,
     pub slots: Vec<(usize, String)>,
+    /// Extra drawn facings; frame 0 is this sprite itself, frame i is `views[i - 1]`.
+    pub views: Vec<SpriteRt>,
+    /// For each of the 8 directions (see `FACINGS`): which frame to show
+    /// and whether to mirror it.
+    pub facing: [(u8, bool); 8],
+    /// Whether the renderer adds an outline.
+    pub outline: bool,
+}
+
+/// Directions in facing order: index 0 faces the viewer, then turning
+/// through east. `facing_of` maps a movement onto these.
+pub const FACINGS: [&str; 8] = ["s", "se", "e", "ne", "n", "nw", "w", "sw"];
+
+/// Facing index (into `FACINGS`) for a movement, with +y pointing north.
+pub fn facing_of(dx: f32, dy: f32) -> usize {
+    let a = dx.atan2(-dy) / std::f32::consts::FRAC_PI_4;
+    (a.round() as i32).rem_euclid(8) as usize
 }
 
 impl SpriteRt {
     pub fn compile(def: &SpriteDef) -> Result<SpriteRt, String> {
-        let h = def.rows.len() as u32;
-        let w = def.rows.iter().map(|r| r.chars().count()).max().unwrap_or(0) as u32;
+        let mut base = Self::frame(&def.palette, &def.rows)?;
+        base.outline = def.outline;
+        // Frame per drawn facing; index 0 is the front view.
+        let mut drawn: [Option<u8>; 8] = [None; 8];
+        drawn[0] = Some(0);
+        for (name, rows) in &def.views {
+            let d = FACINGS.iter().position(|f| f == name).ok_or(format!("unknown sprite view '{name}'"))?;
+            let mut f = Self::frame(&def.palette, rows)?;
+            f.outline = def.outline;
+            base.views.push(f);
+            drawn[d] = Some(base.views.len() as u8);
+        }
+        for d in 0..8 {
+            base.facing[d] = Self::resolve(&drawn, d);
+        }
+        Ok(base)
+    }
+
+    /// Pick a frame for facing `d`: its own drawing, else its mirror image,
+    /// else the nearest drawn facing (side views first, as they show movement best).
+    fn resolve(drawn: &[Option<u8>; 8], d: usize) -> (u8, bool) {
+        let mirror = |d: usize| (8 - d) % 8;
+        let pick = |d: usize| drawn[d].map(|f| (f, false)).or(drawn[mirror(d)].map(|f| (f, true)));
+        for k in 0..=4i32 {
+            let mut near = [(d as i32 + k).rem_euclid(8) as usize, (d as i32 - k).rem_euclid(8) as usize];
+            near.sort_by_key(|&n| !(n == 2 || n == 6));
+            if let Some(f) = near.iter().find_map(|&n| pick(n)) {
+                return f;
+            }
+        }
+        (0, false)
+    }
+
+    fn frame(palette: &BTreeMap<char, String>, rows: &[String]) -> Result<SpriteRt, String> {
+        let h = rows.len() as u32;
+        let w = rows.iter().map(|r| r.chars().count()).max().unwrap_or(0) as u32;
         let mut pixels = vec![[0u8; 4]; (w * h) as usize];
         let mut slots = Vec::new();
-        for (y, row) in def.rows.iter().enumerate() {
+        for (y, row) in rows.iter().enumerate() {
             for (x, ch) in row.chars().enumerate() {
                 let i = y * w as usize + x;
                 if ch == ' ' || ch == '.' {
                     continue;
                 }
-                match def.palette.get(&ch) {
+                match palette.get(&ch) {
                     Some(c) if c.starts_with('$') => slots.push((i, c[1..].to_string())),
                     Some(c) => pixels[i] = parse_color(c).ok_or(format!("bad colour '{c}'"))?,
                     None => return Err(format!("sprite char '{ch}' not in palette")),
                 }
             }
         }
-        Ok(SpriteRt { w, h, pixels, slots })
+        Ok(SpriteRt { w, h, pixels, slots, views: Vec::new(), facing: [(0, false); 8], outline: true })
     }
 
     /// A little pile of particles in one colour, for items without a sprite.
@@ -313,7 +364,7 @@ impl SpriteRt {
                 }
             }
         }
-        SpriteRt { w: 4, h: 5, pixels, slots: Vec::new() }
+        SpriteRt { w: 4, h: 5, pixels, slots: Vec::new(), views: Vec::new(), facing: [(0, false); 8], outline: true }
     }
 }
 
@@ -749,5 +800,45 @@ impl Content {
         let mut v: Vec<usize> = (0..self.jobs.len()).collect();
         v.sort_by_key(|&i| -self.jobs.by_idx(i).priority);
         v
+    }
+}
+
+#[cfg(test)]
+mod facing_tests {
+    use super::*;
+
+    fn sprite(views: &[&str]) -> SpriteRt {
+        let mut def = SpriteDef { palette: [('x', "#ffffff".to_string())].into(), rows: vec!["x".into()], ..Default::default() };
+        def.outline = true;
+        for v in views {
+            def.views.insert(v.to_string(), vec!["x".into()]);
+        }
+        SpriteRt::compile(&def).unwrap()
+    }
+
+    #[test]
+    fn movement_maps_to_facings() {
+        assert_eq!(FACINGS[facing_of(0.0, -1.0)], "s");
+        assert_eq!(FACINGS[facing_of(1.0, 0.0)], "e");
+        assert_eq!(FACINGS[facing_of(0.0, 1.0)], "n");
+        assert_eq!(FACINGS[facing_of(-1.0, 0.0)], "w");
+        assert_eq!(FACINGS[facing_of(1.0, 1.0)], "ne");
+        assert_eq!(FACINGS[facing_of(-1.0, -1.0)], "sw");
+    }
+
+    #[test]
+    fn missing_views_mirror_or_borrow() {
+        // Front only: every facing shows it.
+        assert!(sprite(&[]).facing.iter().all(|&(f, _)| f == 0));
+        // East drawn: west mirrors it, and diagonals borrow the side view.
+        let s = sprite(&["e", "n"]);
+        let e = s.facing[2].0;
+        assert_eq!(s.facing[6], (e, true));
+        assert_eq!(s.facing[1], (e, false));
+        assert_eq!(s.facing[5], (e, true));
+        assert_eq!(s.facing[4].1, false);
+        // All eight drawn: nothing is mirrored.
+        let all = sprite(&["se", "e", "ne", "n", "nw", "w", "sw"]);
+        assert!(all.facing.iter().enumerate().all(|(d, &(f, flip))| !flip && (d == 0) == (f == 0)));
     }
 }

@@ -122,8 +122,16 @@ pub struct MaterialDef {
 pub struct SpriteDef {
     /// char -> `#rrggbb[aa]` or a slot like `$shirt` filled per instance.
     pub palette: BTreeMap<char, String>,
-    /// Top row first.
+    /// Top row first. This is the front view, facing the viewer (south).
     pub rows: Vec<String>,
+    /// Other facings, by direction: "se", "e", "ne", "n", "nw", "w", "sw".
+    /// West-facing views are mirrored from east ones when left out, and any
+    /// other missing facing borrows the nearest one drawn.
+    #[serde(default)]
+    pub views: BTreeMap<String, Vec<String>>,
+    /// Add a dark outline around the shape. Turn off for art that draws its own.
+    #[serde(default = "yes")]
+    pub outline: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
