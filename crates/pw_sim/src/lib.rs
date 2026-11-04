@@ -93,6 +93,14 @@ fn apply(world: &mut World, content: &Content, rng: &mut Rng, r: &ReactionRt, x:
         }
         other = Some((nx, ny, *nl));
     }
+    if r.swap {
+        if let Some((nx, ny, nl)) = other {
+            let a = world.get(x, y, r.layer);
+            let b = world.get(nx, ny, nl);
+            world.set_raw(content, x, y, r.layer, b, NO_OBJ);
+            world.set_raw(content, nx, ny, nl, a, NO_OBJ);
+        }
+    }
     for e in &r.effects {
         let (tx, ty, tl) = match e.target {
             Target::Me => (x, y, r.layer),

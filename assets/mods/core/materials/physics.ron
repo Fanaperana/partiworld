@@ -1,0 +1,20 @@
+// Materials that take part in the world's physics: water, ice, lava, gases.
+[
+    // A dug hole in the ground. Water next to it flows in and fills it.
+    MaterialDef(id: "core:pit", name: "Dug pit", color: "#4a3626", variance: 0.12, walk_cost: 1.6, tags: ["basin"]),
+
+    // Water turns to ice below freezing and back above it (see reactions/physics.ron).
+    MaterialDef(id: "core:ice", name: "Ice", color: "#bcd8ea", variance: 0.06, walk_cost: 1.4, tags: ["ice", "cold"]),
+    MaterialDef(id: "core:deep_ice", name: "Thick ice", color: "#a8c8e0", variance: 0.06, walk_cost: 1.4, tags: ["ice", "cold"]),
+
+    // Lava flows a short way (lava -> flow -> edge), sets things alight, then cools to basalt.
+    MaterialDef(id: "core:lava", name: "Lava", color: "#ff5a14", variance: 0.35, walk_cost: 0.0, tags: ["hot", "glow", "lava"]),
+    MaterialDef(id: "core:lava_flow", name: "Lava", color: "#f0480f", variance: 0.35, walk_cost: 0.0, tags: ["hot", "glow", "lava"]),
+    MaterialDef(id: "core:lava_edge", name: "Cooling lava", color: "#a8320e", variance: 0.4, walk_cost: 0.0, tags: ["hot", "lava"]),
+    MaterialDef(id: "core:basalt", name: "Basalt", color: "#3b3634", variance: 0.14, walk_cost: 1.1),
+    MaterialDef(id: "core:glass", name: "Glass", color: "#b8e4e0", variance: 0.1, walk_cost: 1.0),
+
+    // Gases live in the overlay layer and drift with the wind.
+    MaterialDef(id: "core:smoke", name: "Smoke", color: "#5a5652a0", variance: 0.25, tags: ["gas"]),
+    MaterialDef(id: "core:steam", name: "Steam", color: "#e8eef2a0", variance: 0.15, tags: ["gas"]),
+]

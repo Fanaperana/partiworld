@@ -367,6 +367,11 @@ pub struct ReactionDef {
     /// The neighbour is picked downwind more often in wind (fire, spores).
     #[serde(default)]
     pub windy: bool,
+    /// Move instead of transform: this cell and the matched neighbour swap
+    /// places (smoke drifting, sand sliding). Effects then apply to the new
+    /// positions: `Me` = where the neighbour's material ended up.
+    #[serde(default)]
+    pub swap: bool,
     /// Only happens within this outdoor temperature range (degrees C).
     #[serde(default)]
     pub min_temp: Option<f32>,
@@ -545,4 +550,69 @@ impl Default for WorldGenDef {
 macro_rules! impl_def {
     ($($t:ty),*) => { $(impl Def for $t { fn def_id(&self) -> &str { &self.id } })* };
 }
-impl_def!(MaterialDef, ItemDef, ObjectDef, BiomeDef, ReactionDef, JobDef, CreatureDef);
+impl_def!(MaterialDef, ItemDef, ObjectDef, BiomeDef, ReactionDef, JobDef, CreatureDef, PowerDef);
+
+/// A god power: a brush the player paints onto the world, made of effects.
+/// Mods add powers by adding files to `powers/`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PowerDef {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// Groups powers in the menu.
+    #[serde(default = "default_power_category")]
+    pub category: String,
+    /// Starting brush radius in particles.
+    #[serde(default = "default_power_radius")]
+    pub radius: i32,
+    /// Keep applying while the mouse is held (painting) instead of once per click.
+    #[serde(default)]
+    pub continuous: bool,
+    pub effects: Vec<PowerEffect>,
+}
+
+fn default_power_category() -> String {
+    "Powers".into()
+}
+fn default_power_radius() -> i32 {
+    6
+}
+fn full_ring() -> (f32, f32) {
+    (0.0, 1.0)
+}
+
+/// One thing a power does. `ring` limits it to part of the brush, as
+/// fractions of the radius (0 = centre, 1 = edge; may go past 1).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum PowerEffect {
+    /// Set particles of a layer. `onto` limits which ones (material id,
+    /// `tag:x`, `none` or `any`). Setting particles of objects damages them.
+    Paint {
+        layer: Layer,
+        set: String,
+        #[serde(default = "one")]
+        chance: f32,
+        #[serde(default)]
+        onto: Option<String>,
+        #[serde(default = "full_ring")]
+        ring: (f32, f32),
+    },
+    /// Set flammable things on fire.
+    Ignite {
+        #[serde(default = "one")]
+        chance: f32,
+        #[serde(default = "full_ring")]
+        ring: (f32, f32),
+    },
+    /// Drop objects at random spots inside the brush.
+    Place { object: String, count: u32 },
+    /// Spawn creatures inside the brush.
+    Spawn { creature: String, count: u32 },
+    /// Change the weather right away.
+    Weather { id: String },
+    /// Call a script function `fn name(ctx, x, y)`.
+    Script { function: String },
+    /// A bright flash (lightning, explosions); purely visual.
+    Flash,
+}

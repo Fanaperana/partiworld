@@ -29,6 +29,8 @@ pub enum Tool {
     Place(String),
     Ignite,
     SpawnColonist,
+    /// A god power from data.
+    Power(String),
 }
 
 impl Tool {
@@ -56,6 +58,9 @@ pub struct UiState {
     /// Last build / plant choice, for the B and T hotkeys.
     pub last_build: String,
     pub last_plant: String,
+    /// Brush radius for god powers.
+    pub power_radius: i32,
+    power_timer: f32,
     pub editor: Editor,
     pub toast: Option<(String, f32)>,
     pub save_path: PathBuf,
@@ -79,6 +84,8 @@ impl Default for UiState {
             follow: false,
             last_build: "core:wall_wood".into(),
             last_plant: "core:oak_sapling".into(),
+            power_radius: 6,
+            power_timer: 0.0,
             editor: Editor::default(),
             toast: None,
             save_path: PathBuf::from("saves/quicksave.pws"),
@@ -287,6 +294,7 @@ fn world_tools(
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     mut ui: ResMut<UiState>,
     mut game: ResMut<GameRes>,
+    time: Res<Time>,
 ) {
     ui.cursor = cursor_world(&window, &cam);
     let Some(cur) = ui.cursor else { return };
@@ -363,6 +371,19 @@ fn world_tools(
             }
         }
         Tool::Ignite if buttons.just_pressed(MouseButton::Left) => g.ignite(x, y, 3),
+        Tool::Power(id) => {
+            let continuous = g.content.powers.get(&id).is_some_and(|p| p.continuous);
+            ui.power_timer -= time.delta_secs();
+            let fire = if continuous {
+                buttons.pressed(MouseButton::Left) && ui.power_timer <= 0.0
+            } else {
+                buttons.just_pressed(MouseButton::Left)
+            };
+            if fire {
+                ui.power_timer = 0.06;
+                g.use_power(&id, x, y, ui.power_radius);
+            }
+        }
         Tool::SpawnColonist if buttons.just_pressed(MouseButton::Left) => g.spawn_colonist(tile_of(x, y)),
         _ => {}
     }
@@ -403,6 +424,9 @@ fn draw_tool_preview(ui: Res<UiState>, mut gizmos: Gizmos, game: Res<GameRes>, t
     match (&ui.tool, ui.drag_start) {
         (Tool::Paint, _) => {
             gizmos.circle_2d(Isometry2d::from_translation(cur), ui.paint_radius as f32 + 0.5, Color::WHITE);
+        }
+        (Tool::Power(_), _) => {
+            gizmos.circle_2d(Isometry2d::from_translation(cur), ui.power_radius as f32 + 0.5, Color::srgb(1.0, 0.8, 0.4));
         }
         (Tool::Ignite, _) => {
             gizmos.circle_2d(Isometry2d::from_translation(cur), 3.5, Color::srgb(1.0, 0.5, 0.1));
@@ -623,6 +647,24 @@ fn ui_panels(
                 });
                 ui.collapsing("God powers", |ui| {
                     let c = g.content.clone();
+                    let mut cats: Vec<String> = c.powers.iter().map(|(_, p)| p.category.clone()).collect();
+                    cats.dedup();
+                    cats.sort();
+                    cats.dedup();
+                    for cat in cats {
+                        ui.label(egui::RichText::new(&cat).weak());
+                        ui.horizontal_wrapped(|ui| {
+                            for (_, p) in c.powers.iter().filter(|(_, p)| p.category == cat) {
+                                let on = st.tool == Tool::Power(p.id.clone());
+                                if ui.selectable_label(on, &p.name).on_hover_text(&p.description).clicked() {
+                                    st.tool = Tool::Power(p.id.clone());
+                                    st.power_radius = p.radius;
+                                }
+                            }
+                        });
+                    }
+                    ui.add(egui::Slider::new(&mut st.power_radius, 1..=60).text("brush"));
+                    ui.separator();
                     tool_button(ui, st, Tool::Paint, "🖌 Paint particles");
                     egui::ComboBox::from_id_salt("paint_mat")
                         .selected_text(c.materials.get(&st.paint_mat).map(|m| m.name.as_str()).unwrap_or("?"))

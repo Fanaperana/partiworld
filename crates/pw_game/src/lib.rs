@@ -70,6 +70,8 @@ pub struct Game {
     pub env: Env,
     /// Why the last `build` call skipped tiles, for the UI.
     pub last_build_error: Option<String>,
+    /// Recent flashes (x, y, radius, tick) for the renderer: lightning, meteors.
+    pub flashes: Vec<(f32, f32, f32, u64)>,
     pool: GenPool,
     /// Chunks wanted by the camera; set by the front end each frame.
     pub view: Option<(ChunkPos, ChunkPos)>,
@@ -96,6 +98,7 @@ impl Game {
             mods_dir,
             env: Env::default(),
             last_build_error: None,
+            flashes: Vec::new(),
             pool: GenPool::new(threads),
             view: None,
         };
@@ -396,6 +399,116 @@ impl Game {
             Anchor::Tile => tile_of(x, y).origin(),
         };
         objs::place(&mut self.world, &self.content, d, origin, seed, false);
+        true
+    }
+
+    /// Use a god power (from `powers/` data) centred on a particle.
+    pub fn use_power(&mut self, id: &str, cx: i32, cy: i32, radius: i32) -> bool {
+        let content = self.content.clone();
+        let Some(pi) = content.powers.idx(id) else { return false };
+        let power = content.powers.by_idx(pi).clone();
+        let owner = content.powers.source(pi).to_string();
+        let radius = radius.max(0);
+        let rf = radius.max(1) as f32;
+        let fire = content.mat("core:fire");
+        let flammable = content.mat_mask("tag:flammable").unwrap_or_default();
+        for effect in &power.effects {
+            match effect {
+                PowerEffect::Paint { layer, set, chance, onto, ring } => {
+                    let Some(m) = content.mat(set) else {
+                        self.message(format!("Power {id}: unknown material '{set}'"));
+                        continue;
+                    };
+                    let mask = onto.as_deref().and_then(|o| content.mat_mask(o));
+                    let reach = (ring.1 * rf).ceil() as i32;
+                    for y in -reach..=reach {
+                        for x in -reach..=reach {
+                            let d = ((x * x + y * y) as f32).sqrt() / rf;
+                            if d < ring.0 || d > ring.1 || (*chance < 1.0 && !self.rng.chance(*chance)) {
+                                continue;
+                            }
+                            let (px, py) = (cx + x, cy + y);
+                            if let Some(mask) = &mask {
+                                let cur = self.world.get(px, py, *layer);
+                                if !mask.get(cur as usize).copied().unwrap_or(false) {
+                                    continue;
+                                }
+                            }
+                            self.world.set(&content, px, py, *layer, m, NO_OBJ);
+                        }
+                    }
+                }
+                PowerEffect::Ignite { chance, ring } => {
+                    let Some(fire) = fire else { continue };
+                    let reach = (ring.1 * rf).ceil() as i32;
+                    for y in -reach..=reach {
+                        for x in -reach..=reach {
+                            let d = ((x * x + y * y) as f32).sqrt() / rf;
+                            if d < ring.0 || d > ring.1 || !self.rng.chance(*chance) {
+                                continue;
+                            }
+                            let (px, py) = (cx + x, cy + y);
+                            for l in [Layer::Overlay, Layer::Solid, Layer::Floor] {
+                                let m = self.world.get(px, py, l);
+                                if m != NONE_MAT && flammable.get(m as usize).copied().unwrap_or(false) {
+                                    self.world.set(&content, px, py, l, fire, NO_OBJ);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                PowerEffect::Place { object, count } => {
+                    for _ in 0..*count {
+                        let (x, y) = self.random_in(cx, cy, radius);
+                        if let Some(d) = content.objects.idx(object) {
+                            let seed = self.rng.next_u64();
+                            let origin = match content.protos[d].anchor {
+                                Anchor::Center => (x, y),
+                                Anchor::Tile => tile_of(x, y).origin(),
+                            };
+                            if objs::can_place(&self.world, &content, d, origin, seed) {
+                                objs::place(&mut self.world, &content, d, origin, seed, false);
+                            }
+                        }
+                    }
+                }
+                PowerEffect::Spawn { creature, count } => {
+                    for _ in 0..*count {
+                        let (x, y) = self.random_in(cx, cy, radius);
+                        self.spawn_creature(creature, tile_of(x, y));
+                    }
+                }
+                PowerEffect::Weather { id: w } => {
+                    if content.climate.weather.iter().any(|d| &d.id == w) {
+                        self.env.weather = w.clone();
+                        self.env.weather_until = self.tick + 6 * env::HOUR_TICKS;
+                        if let Some(d) = content.climate.weather.iter().find(|d| &d.id == w) {
+                            self.env.wind_target = d.wind.1;
+                        }
+                    }
+                }
+                PowerEffect::Script { function } => self.call_script(&owner, function, (cx, cy)),
+                PowerEffect::Flash => self.flashes.push((cx as f32, cy as f32, rf.max(4.0) * 2.5, self.tick)),
+            }
+        }
+        self.flashes.retain(|f| self.tick.saturating_sub(f.3) < 60);
+        true
+    }
+
+    fn random_in(&mut self, cx: i32, cy: i32, r: i32) -> (i32, i32) {
+        let a = self.rng.f32() * std::f32::consts::TAU;
+        let d = self.rng.f32().sqrt() * r.max(1) as f32;
+        (cx + (a.cos() * d) as i32, cy + (a.sin() * d) as i32)
+    }
+
+    /// Spawn any creature by id (colonists join the colony).
+    pub fn spawn_creature(&mut self, id: &str, t: TilePos) -> bool {
+        let Some(c) = self.content.creatures.idx(id) else { return false };
+        if !self.world.walkable(t) {
+            return false;
+        }
+        self.colony.spawn_pawn(&self.content, c, t, &mut self.rng);
         true
     }
 

@@ -1,0 +1,74 @@
+// Heat, water, ice, lava and gas. All of it is plain data: a mod can add a
+// new liquid or gas the same way.
+//
+// "Heat" is anything tagged `hot` (fire, lava). It melts ice, boils water,
+// turns sand to glass and sets flammable things alight.
+[
+    // ---- gases: drift (swap with empty air), follow the wind, fade away
+    ReactionDef(id: "core:smoke_drifts", layer: Overlay, input: "tag:gas", chance: 0.45, swap: true, windy: true,
+        neighbor: NeighborDef(layer: Overlay, matches: "none"), effects: []),
+    ReactionDef(id: "core:smoke_fades", layer: Overlay, input: "core:smoke", chance: 0.012,
+        effects: [EffectDef(target: Me, set: "none")]),
+    ReactionDef(id: "core:steam_fades", layer: Overlay, input: "core:steam", chance: 0.03,
+        effects: [EffectDef(target: Me, set: "none")]),
+    // Fire on the ground or in trunks gives off smoke into the air above it.
+    ReactionDef(id: "core:fire_smokes_floor", layer: Floor, input: "core:fire", chance: 0.06,
+        neighbor: NeighborDef(layer: Overlay, matches: "none", same_cell: true),
+        effects: [EffectDef(target: Other, set: "core:smoke")]),
+    ReactionDef(id: "core:fire_smokes_solid", layer: Solid, input: "core:fire", chance: 0.06,
+        neighbor: NeighborDef(layer: Overlay, matches: "none", same_cell: true),
+        effects: [EffectDef(target: Other, set: "core:smoke")]),
+
+    // ---- water
+    // Dug pits fill from neighbouring water (rivers into channels, floods into holes).
+    ReactionDef(id: "core:pit_fills", layer: Floor, input: "core:pit", chance: 0.12,
+        neighbor: NeighborDef(layer: Floor, matches: "tag:water"),
+        effects: [EffectDef(target: Me, set: "core:water")]),
+    // Freezing and thawing follow the outdoor temperature.
+    ReactionDef(id: "core:water_freezes", layer: Floor, input: "core:water", chance: 0.3, mode: Random, max_temp: -2.0,
+        effects: [EffectDef(target: Me, set: "core:ice")]),
+    ReactionDef(id: "core:deep_water_freezes", layer: Floor, input: "core:deep_water", chance: 0.15, mode: Random, max_temp: -6.0,
+        effects: [EffectDef(target: Me, set: "core:deep_ice")]),
+    ReactionDef(id: "core:ice_melts", layer: Floor, input: "core:ice", chance: 0.3, mode: Random, min_temp: 1.0,
+        effects: [EffectDef(target: Me, set: "core:water")]),
+    ReactionDef(id: "core:deep_ice_melts", layer: Floor, input: "core:deep_ice", chance: 0.2, mode: Random, min_temp: 1.0,
+        effects: [EffectDef(target: Me, set: "core:deep_water")]),
+
+    // ---- heat
+    ReactionDef(id: "core:heat_melts_ice", layer: Floor, input: "tag:hot", chance: 0.2,
+        neighbor: NeighborDef(layer: Floor, matches: "tag:ice"),
+        effects: [EffectDef(target: Other, set: "core:water"), EffectDef(target: Other, layer: Overlay, set: "core:steam")]),
+    // Lava meeting water: the lava crusts over into basalt, the water boils off as steam.
+    ReactionDef(id: "core:lava_quenched", layer: Floor, input: "tag:lava", chance: 0.35,
+        neighbor: NeighborDef(layer: Floor, matches: "tag:water"),
+        effects: [EffectDef(target: Me, set: "core:basalt"), EffectDef(target: Other, layer: Overlay, set: "core:steam")]),
+    ReactionDef(id: "core:lava_makes_glass", layer: Floor, input: "tag:lava", chance: 0.04,
+        neighbor: NeighborDef(layer: Floor, matches: "core:sand"),
+        effects: [EffectDef(target: Other, set: "core:glass")]),
+    ReactionDef(id: "core:lava_ignites_ground", layer: Floor, input: "tag:lava", chance: 0.2, windy: true,
+        neighbor: NeighborDef(layer: Floor, matches: "tag:flammable"),
+        effects: [EffectDef(target: Other, set: "core:fire")]),
+    ReactionDef(id: "core:lava_ignites_solid", layer: Floor, input: "tag:lava", chance: 0.15,
+        neighbor: NeighborDef(layer: Solid, matches: "tag:flammable"),
+        effects: [EffectDef(target: Other, set: "core:fire")]),
+    ReactionDef(id: "core:lava_smokes", layer: Floor, input: "tag:lava", chance: 0.015,
+        neighbor: NeighborDef(layer: Overlay, matches: "none", same_cell: true),
+        effects: [EffectDef(target: Other, set: "core:smoke")]),
+
+    // ---- lava flow: fresh lava spreads, its flow spreads a little more, the edge stops
+    ReactionDef(id: "core:lava_spreads", layer: Floor, input: "core:lava", chance: 0.05,
+        neighbor: NeighborDef(layer: Floor, matches: "tag:soil"),
+        effects: [EffectDef(target: Other, set: "core:lava_flow")]),
+    ReactionDef(id: "core:lava_spreads_sand", layer: Floor, input: "core:lava", chance: 0.05,
+        neighbor: NeighborDef(layer: Floor, matches: "core:ash"),
+        effects: [EffectDef(target: Other, set: "core:lava_flow")]),
+    ReactionDef(id: "core:lava_flow_spreads", layer: Floor, input: "core:lava_flow", chance: 0.03,
+        neighbor: NeighborDef(layer: Floor, matches: "tag:soil"),
+        effects: [EffectDef(target: Other, set: "core:lava_edge")]),
+    ReactionDef(id: "core:lava_cools", layer: Floor, input: "core:lava", chance: 0.0015, wet: 4.0,
+        effects: [EffectDef(target: Me, set: "core:lava_flow")]),
+    ReactionDef(id: "core:lava_flow_cools", layer: Floor, input: "core:lava_flow", chance: 0.003, wet: 4.0,
+        effects: [EffectDef(target: Me, set: "core:lava_edge")]),
+    ReactionDef(id: "core:lava_edge_cools", layer: Floor, input: "core:lava_edge", chance: 0.004, wet: 4.0,
+        effects: [EffectDef(target: Me, set: "core:basalt")]),
+]

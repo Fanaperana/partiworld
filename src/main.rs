@@ -127,6 +127,23 @@ fn autoshot(
             }
         }
         ui.selected = g.colony.pawns.first().map(|p| p.id);
+        // Optional: show off god powers (meteor, lava, water, dig).
+        if std::env::var("PW_AUTOSHOT_POWERS").is_ok() {
+            let at = |dx: i32, dy: i32| {
+                let (x, y) = home.offset(dx, dy).center();
+                (x as i32, y as i32)
+            };
+            let (x, y) = at(-14, -6);
+            g.use_power("core:meteor", x, y, 14);
+            let (x, y) = at(14, -8);
+            g.use_power("core:volcano", x, y, 6);
+            for i in 0..12 {
+                let (x, y) = at(-16 + i, 8);
+                g.use_power("core:dig", x, y, 3);
+            }
+            let (x, y) = at(-18, 8);
+            g.use_power("core:flood", x, y, 6);
+        }
         // A finished roof with a colonist under it, to check see-through roofs.
         if std::env::var("PW_AUTOSHOT_ROOF").is_ok() {
             for t in r((-12, 3), (-8, 7)).iter() {

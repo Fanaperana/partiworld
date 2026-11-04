@@ -235,6 +235,7 @@ pub struct ReactionRt {
     pub effects: Vec<EffectRt>,
     pub wet: f32,
     pub windy: bool,
+    pub swap: bool,
     pub temp: (f32, f32),
 }
 
@@ -333,6 +334,7 @@ pub struct Content {
     pub reactions: Registry<ReactionDef>,
     pub jobs: Registry<JobDef>,
     pub creatures: Registry<CreatureDef>,
+    pub powers: Registry<PowerDef>,
     pub worldgen: WorldGenDef,
     pub climate: ClimateDef,
 
@@ -377,6 +379,7 @@ impl Content {
             reactions: Registry::new(),
             jobs: Registry::new(),
             creatures: Registry::new(),
+            powers: Registry::new(),
             worldgen: WorldGenDef::default(),
             climate: ClimateDef::default(),
             mats: Vec::new(),
@@ -394,6 +397,20 @@ impl Content {
         }
         self.materials.idx(id).map(|i| i as MatId)
     }
+    /// Which materials a pattern matches: a material id, `tag:<tag>`, `none` or `any`.
+    /// Returns one flag per material index (None if the id is unknown).
+    pub fn mat_mask(&self, spec: &str) -> Option<Vec<bool>> {
+        let n = self.mats.len();
+        if spec == "any" {
+            return Some(vec![true; n]);
+        }
+        if let Some(tag) = spec.strip_prefix("tag:") {
+            return Some(self.mats.iter().map(|r| r.has_tag(tag)).collect());
+        }
+        let id = self.mat(spec)? as usize;
+        Some((0..n).map(|i| i == id).collect())
+    }
+
     pub fn mat_rt(&self, m: MatId) -> &MaterialRt {
         &self.mats[m as usize]
     }
@@ -680,6 +697,7 @@ impl Content {
                 effects,
                 wet: d.wet.max(0.0),
                 windy: d.windy,
+                swap: d.swap,
                 temp: (d.min_temp.unwrap_or(f32::MIN), d.max_temp.unwrap_or(f32::MAX)),
             });
             let table = match d.mode {

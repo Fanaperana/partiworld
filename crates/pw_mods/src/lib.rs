@@ -289,6 +289,7 @@ pub fn load_mod(m: &ModInfo, c: &mut Content, host: &mut ScriptHost, report: &mu
     load_dir(m, "reactions", &mut c.reactions, report);
     load_dir(m, "jobs", &mut c.jobs, report);
     load_dir(m, "creatures", &mut c.creatures, report);
+    load_dir(m, "powers", &mut c.powers, report);
     let wg = m.path.join("worldgen.ron");
     if let Ok(text) = fs::read_to_string(&wg) {
         match parse_ron::<WorldGenDef>(&text) {

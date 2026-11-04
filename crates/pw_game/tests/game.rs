@@ -469,3 +469,111 @@ fn rain_slows_fire_and_wind_pushes_it() {
     let (_, west) = burn_field(0.0, (-0.9, 0.0));
     assert!(east > 128.0 + 4.0 && west < 128.0 - 4.0, "wind should push fire: east {east}, west {west}");
 }
+
+/// A one-chunk world filled with one floor material, for physics tests.
+fn flat_world(c: &Content, floor: &str) -> pw_world::World {
+    let mut w = pw_world::World::new(1);
+    let f = c.mat(floor).unwrap();
+    let mut ch = pw_world::Chunk::new(ChunkPos::new(0, 0));
+    ch.mat[0].iter_mut().for_each(|m| *m = f);
+    w.insert_chunk(ch);
+    w
+}
+
+fn count(w: &pw_world::World, c: &Content, layer: Layer, mat: &str) -> usize {
+    let m = c.mat(mat).unwrap();
+    w.chunks.values().map(|ch| ch.mat[layer.index()].iter().filter(|&&x| x == m).count()).sum()
+}
+
+fn sim(w: &mut pw_world::World, c: &Content, ticks: u32, temp: f32) {
+    let mut rng = Rng::new(3);
+    let env = pw_sim::SimEnv { wet: 0.0, wind: (0.0, 0.0), temp };
+    for _ in 0..ticks {
+        pw_sim::tick(w, c, &mut rng, &Default::default(), &env);
+    }
+}
+
+#[test]
+fn every_power_works() {
+    let mut g = new_game(5);
+    let home = g.spawn_tile();
+    let ids: Vec<String> = g.content.powers.iter().map(|(_, p)| p.id.clone()).collect();
+    assert!(ids.len() >= 10, "{ids:?}");
+    for (i, id) in ids.iter().enumerate() {
+        let (x, y) = home.offset(-20 + (i as i32 % 5) * 10, 10 + (i as i32 / 5) * 10).center();
+        let r = g.content.powers.get(id).unwrap().radius;
+        assert!(g.use_power(id, x as i32, y as i32, r), "{id}");
+    }
+    run(&mut g, 60, |_| false);
+    let bad: Vec<&String> = g.log.iter().filter(|m| m.contains("unknown") || m.contains("failed")).collect();
+    assert!(bad.is_empty(), "{bad:?}");
+}
+
+#[test]
+fn lava_flows_burns_and_cools() {
+    let c = new_game(1).content.clone();
+    let mut w = flat_world(&c, "core:dirt");
+    let lava = c.mat("core:lava").unwrap();
+    for dy in -3..=3 {
+        for dx in -3..=3 {
+            w.set(&c, 128 + dx, 128 + dy, Layer::Floor, lava, pw_world::NO_OBJ);
+        }
+    }
+    sim(&mut w, &c, 400, 15.0);
+    let hot = count(&w, &c, Layer::Floor, "core:lava") + count(&w, &c, Layer::Floor, "core:lava_flow") + count(&w, &c, Layer::Floor, "core:lava_edge");
+    assert!(hot + count(&w, &c, Layer::Floor, "core:basalt") > 49, "lava did not spread");
+    sim(&mut w, &c, 6000, 15.0);
+    let still_hot = count(&w, &c, Layer::Floor, "core:lava") + count(&w, &c, Layer::Floor, "core:lava_flow") + count(&w, &c, Layer::Floor, "core:lava_edge");
+    assert!(still_hot < 10, "lava did not cool: {still_hot} left");
+    assert!(count(&w, &c, Layer::Floor, "core:basalt") > 49);
+}
+
+#[test]
+fn water_freezes_thaws_and_fills_pits() {
+    let c = new_game(1).content.clone();
+    let mut w = flat_world(&c, "core:water");
+    sim(&mut w, &c, 4000, -10.0);
+    let ice = count(&w, &c, Layer::Floor, "core:ice");
+    assert!(ice > 20_000, "only {ice} ice");
+    sim(&mut w, &c, 4000, 10.0);
+    assert!(count(&w, &c, Layer::Floor, "core:ice") < ice / 2, "ice did not melt");
+
+    // A channel dug next to water fills up.
+    let mut w = flat_world(&c, "core:dirt");
+    let water = c.mat("core:water").unwrap();
+    let pit = c.mat("core:pit").unwrap();
+    for y in 0..256 {
+        w.set(&c, 10, y, Layer::Floor, water, pw_world::NO_OBJ);
+    }
+    for x in 11..40 {
+        w.set(&c, x, 100, Layer::Floor, pit, pw_world::NO_OBJ);
+    }
+    sim(&mut w, &c, 1500, 15.0);
+    assert_eq!(count(&w, &c, Layer::Floor, "core:pit"), 0, "channel did not fill");
+}
+
+#[test]
+fn smoke_drifts_with_the_wind_and_fades() {
+    let c = new_game(1).content.clone();
+    let mut w = flat_world(&c, "core:dirt");
+    let smoke = c.mat("core:smoke").unwrap();
+    for dy in -2..=2 {
+        for dx in -2..=2 {
+            w.set(&c, 128 + dx, 128 + dy, Layer::Overlay, smoke, pw_world::NO_OBJ);
+        }
+    }
+    let mut rng = Rng::new(3);
+    let env = pw_sim::SimEnv { wet: 0.0, wind: (0.9, 0.0), temp: 15.0 };
+    for _ in 0..40 {
+        pw_sim::tick(&mut w, &c, &mut rng, &Default::default(), &env);
+    }
+    let ch = &w.chunks[&ChunkPos::new(0, 0)];
+    let xs: Vec<f32> = ch.mat[2].iter().enumerate().filter(|(_, m)| **m == smoke).map(|(i, _)| (i % 256) as f32).collect();
+    assert!(!xs.is_empty());
+    let mean = xs.iter().sum::<f32>() / xs.len() as f32;
+    assert!(mean > 131.0, "smoke should drift east, mean x {mean}");
+    for _ in 0..2000 {
+        pw_sim::tick(&mut w, &c, &mut rng, &Default::default(), &env);
+    }
+    assert_eq!(count(&w, &c, Layer::Overlay, "core:smoke"), 0, "smoke never faded");
+}

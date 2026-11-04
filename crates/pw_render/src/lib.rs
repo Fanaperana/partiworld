@@ -144,7 +144,7 @@ impl Plugin for PwRenderPlugin {
             .add_systems(Startup, setup_camera)
             .add_systems(
                 Update,
-                (run_sim, update_view, sync_chunks, sync_items, sync_blueprints, sync_pawns, day_night, weather_fx, draw_zones).chain(),
+                (run_sim, update_view, sync_chunks, sync_items, sync_blueprints, sync_pawns, day_night, weather_fx, draw_flashes, draw_zones).chain(),
             );
     }
 }
@@ -328,9 +328,8 @@ fn particle_color(content: &Content, m: MatId, seed: u64, x: i32, y: i32, layer:
 /// visibly changes.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct Look {
-    /// Snow cover 0..8, frozen water, autumn colour 0..10, leaves gone 0..10.
+    /// Snow cover 0..8, autumn colour 0..10, leaves gone 0..10.
     snow: u8,
-    frozen: bool,
     autumn: u8,
     drop: u8,
 }
@@ -340,7 +339,6 @@ impl Look {
         let s = pw_game::env::season_now(&g.content.climate, g.tick);
         Look {
             snow: (g.env.snow * 8.0).round() as u8,
-            frozen: g.env.temp < -2.0,
             autumn: (s.autumn * 10.0).round() as u8,
             drop: (s.leaf_drop * 10.0).round() as u8,
         }
@@ -348,7 +346,6 @@ impl Look {
 }
 
 const SNOW: [u8; 4] = [236, 240, 247, 255];
-const ICE: [u8; 4] = [184, 212, 232, 255];
 
 fn mix(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {
     let f = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
@@ -404,11 +401,7 @@ fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [
                 let fm = chunk.mat[0][i];
                 let fr = content.mat_rt(fm);
                 let mut c = particle_color(content, fm, seed, x, y, 0);
-                if fr.water {
-                    if look.frozen {
-                        c = mix(c, ICE, 0.75);
-                    }
-                } else if snowy(seed, x, y, look.snow) {
+                if !fr.water && snowy(seed, x, y, look.snow) {
                     c = mix(c, SNOW, 0.9);
                 }
                 // Shadows from walls/rocks just below them and from canopies offset down-right.
@@ -844,6 +837,21 @@ fn sync_pawns(
                 let sh = commands.spawn((Sprite::from_image(shadow), shadow_pos, ShadowSprite)).id();
                 views.pawns.insert(p.id, (e, c, sh));
             }
+        }
+    }
+}
+
+fn draw_flashes(game: Res<GameRes>, mut gizmos: Gizmos) {
+    let g = &game.0;
+    for &(x, y, r, t) in &g.flashes {
+        let age = g.tick.saturating_sub(t) as f32 / 20.0;
+        if age >= 1.0 {
+            continue;
+        }
+        let a = 1.0 - age;
+        for k in 0..6 {
+            let rr = r * (0.3 + 0.15 * k as f32) * (1.0 + age);
+            gizmos.circle_2d(Isometry2d::from_translation(Vec2::new(x, y)), rr, Color::srgba(1.0, 0.97, 0.8, a * (1.0 - k as f32 / 6.0)));
         }
     }
 }
