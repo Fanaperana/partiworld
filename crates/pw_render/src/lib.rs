@@ -414,6 +414,8 @@ fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [
     let solid = &chunk.mat[1];
     let overlay = &chunk.mat[2];
     let blocks = |m: MatId| m != NONE_MAT && content.mat_rt(m).blocks;
+    // Bushes: leafy solids and the berries on them.
+    let bushy = |m: MatId| m != NONE_MAT && (content.mat_rt(m).leaves || content.mat_rt(m).fruit);
     for ly in r.1..=r.3 {
         let row = (CHUNK - 1 - ly) as usize;
         for lx in r.0..=r.2 {
@@ -424,11 +426,10 @@ fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [
             let col = if s != NONE_MAT {
                 // Fake height: lit top edge, dark bottom edge.
                 let mut c = particle_color(content, s, seed, x, y, 1);
-                if content.mat_rt(s).leaves {
-                    let (lit, crease) = leaf_clump(seed ^ 0xB054, x, y);
-                    c = shade(c, 1.0 + lit * 0.18 - crease * 0.2);
-                }
-                if blocks(s) && mat_at(solid, lx, ly - 1) == NONE_MAT {
+                let srt = content.mat_rt(s);
+                if srt.leaves || srt.fruit {
+                    paint_bush(chunk, content, seed, lx, ly, &mut c, look);
+                } else if blocks(s) && mat_at(solid, lx, ly - 1) == NONE_MAT {
                     c = shade(c, 0.62);
                 } else if mat_at(solid, lx, ly + 1) == NONE_MAT {
                     c = shade(c, 1.18);
@@ -446,6 +447,11 @@ fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [
                     c = shade(c, 0.6);
                 } else if blocks(mat_at(solid, lx - 1, ly + 2)) {
                     c = shade(c, 0.8);
+                } else if bushy(mat_at(solid, lx - 1, ly + 1)) {
+                    // Bushes cast a short shadow down-right.
+                    c = shade(c, 0.7);
+                } else if bushy(mat_at(solid, lx - 2, ly + 2)) {
+                    c = shade(c, 0.84);
                 } else {
                     let o = mat_at(overlay, lx - 3, ly + 3);
                     if o != NONE_MAT && content.mat_rt(o).color[3] > 128 {
@@ -456,6 +462,60 @@ fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [
             };
             base[p..p + 4].copy_from_slice(&[col[0], col[1], col[2], 255]);
         }
+    }
+}
+
+/// Shade one bush particle (leaf or berry) at local `lx, ly` so the bush
+/// reads as a lit, rounded clump: bright top-left, deep bottom-right rim,
+/// leafy texture, little shadows under berries, autumn colour and snow.
+fn paint_bush(chunk: &Chunk, content: &Content, seed: u64, lx: i32, ly: i32, c: &mut [u8; 4], look: Look) {
+    let (ox, oy) = chunk.pos.origin();
+    let (x, y) = (ox + lx, oy + ly);
+    let solid = &chunk.mat[1];
+    let rt = content.mat_rt(solid[(ly * CHUNK + lx) as usize]);
+    let bushy = |dx: i32, dy: i32| {
+        let m = mat_at(solid, lx + dx, ly + dy);
+        m != NONE_MAT && (content.mat_rt(m).leaves || content.mat_rt(m).fruit)
+    };
+    if rt.fruit {
+        // Berries: a touch brighter, darker where they face away from the light.
+        *c = shade(*c, if bushy(1, -1) { 1.15 } else { 0.85 });
+        return;
+    }
+    let (lit, crease) = leaf_clump(seed ^ 0xB054, x, y);
+    let mut f = 1.0 + lit * 0.25 - crease * 0.2;
+    let open = |dx: i32, dy: i32| (1..=SHADE_REACH).find(|&k| !bushy(dx * k, dy * k));
+    if let Some(k) = open(-1, 1) {
+        f += 0.34 / k as f32;
+    }
+    // Bushes are small: only the outer two rows on the far side fall into shade.
+    if let Some(k) = open(1, -1).filter(|&k| k <= 2) {
+        f -= 0.2 / k as f32;
+    }
+    // A darker rim along the bottom and right edges.
+    if !bushy(1, 0) || !bushy(0, -1) {
+        f -= 0.1;
+    }
+    // Each berry shades the leaves just below-right of it.
+    let m = mat_at(solid, lx - 1, ly + 1);
+    if m != NONE_MAT && content.mat_rt(m).fruit {
+        f -= 0.25;
+    }
+    // Dark greens barely brighten by scaling, so light ones are painted
+    // towards a sunlit leaf green instead.
+    if f > 1.0 {
+        *c = mix(*c, [150, 196, 88, 255], ((f - 1.0) * 1.3).min(0.75));
+    } else {
+        *c = shade(*c, f);
+    }
+    if !rt.evergreen && look.autumn > 0 {
+        let h = unit(hash2(seed ^ 0xB0A7, x as i64, y as i64));
+        let tone = if h < 0.4 { [176, 70, 36, 255] } else { [204, 140, 44, 255] };
+        *c = mix(*c, shade(tone, f), look.autumn as f32 / 10.0 * 0.6);
+    }
+    // Snow settles on the upper side.
+    if look.snow > 0 && !bushy(0, 1) && snowy(seed, x, y, look.snow) {
+        *c = mix(*c, SNOW, 0.85);
     }
 }
 

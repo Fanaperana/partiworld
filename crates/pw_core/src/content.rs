@@ -38,6 +38,8 @@ pub struct MaterialRt {
     /// Tree leaves (tag `leaves`), and whether they stay in winter (`evergreen`).
     pub leaves: bool,
     pub evergreen: bool,
+    /// Food growing on plants, like berries (tag `food`).
+    pub fruit: bool,
     /// Tags `roof` and `water`, used for snow and ice.
     pub roof: bool,
     pub water: bool,
@@ -546,6 +548,7 @@ impl Content {
                     support: d.tags.iter().any(|t| t == "support"),
                     leaves: d.tags.iter().any(|t| t == "leaves"),
                     evergreen: d.tags.iter().any(|t| t == "evergreen"),
+                    fruit: d.tags.iter().any(|t| t == "food"),
                     roof: d.tags.iter().any(|t| t == "roof"),
                     heat: d.heat,
                     hot: d.tags.iter().any(|t| t == "hot"),

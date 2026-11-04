@@ -33,7 +33,7 @@
         name: "Berry bush",
         tags: ["bush", "harvestable", "flammable"],
         shape: Procedural([
-            Blob(layer: Solid, material: "core:bush_leaves", radius: (4.0, 5.5), roughness: 0.5, density: 0.95),
+            Blob(layer: Solid, material: "core:bush_leaves", radius: (4.0, 5.5), roughness: 0.45, density: 1.0),
             Scatter(layer: Solid, material: "core:berries", radius: 4.5, count: (10, 16)),
         ]),
         break_fraction: 0.5,
@@ -46,7 +46,7 @@
         name: "Shrub",
         tags: ["bush", "flammable"],
         shape: Procedural([
-            Blob(layer: Solid, material: "core:bush_leaves_dark", radius: (2.5, 4.5), roughness: 0.7, density: 0.9),
+            Blob(layer: Solid, material: "core:bush_leaves_dark", radius: (2.5, 4.5), roughness: 0.55, density: 1.0),
         ]),
         break_fraction: 0.5,
         drops: [DropDef(item: "core:wood", min: 0, max: 2)],
