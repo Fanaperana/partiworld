@@ -158,6 +158,17 @@ fn autoshot(
         }
         let (x, y) = home.offset(16, 10).center();
         g.ignite(x as i32, y as i32, 4);
+        // Optional: let the tribes live N days, then look at the first one.
+        if let Some(days) = std::env::var("PW_AUTOSHOT_TRIBES").ok().and_then(|s| s.parse::<u64>().ok()) {
+            for _ in 0..days * pw_game::DAY_TICKS {
+                g.step();
+            }
+            if let Some(t) = g.tribes.living().next() {
+                let (x, y) = t.center.center();
+                ui.goto = Some(Vec2::new(x, y));
+                ui.show_tribes = true;
+            }
+        }
     }
     let shot_at: f32 = std::env::var("PW_AUTOSHOT_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(25.0);
     if *step == 1 && t > shot_at {

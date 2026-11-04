@@ -183,7 +183,8 @@ fn colonists_build_and_haul() {
     assert!(placed >= 6, "placed {placed}");
     let ok = run(&mut g, 30 * 300, |g| g.colony.blueprints.is_empty());
     assert!(ok, "walls not built; {} blueprints left", g.colony.blueprints.len());
-    let built = g.world.objects.instances.values().filter(|i| i.built).count();
+    let wall = g.content.objects.idx("core:wall_wood").unwrap();
+    let built = g.world.objects.instances.values().filter(|i| i.built && i.def == wall && rect.contains(i.origin_tile())).count();
     assert_eq!(built, placed);
     // Walls block movement.
     assert!(!g.world.walkable(rect.min));
@@ -270,6 +271,12 @@ fn fire_spreads_and_burns_out() {
     g.load_chunks_now(ChunkPos::new(-2, -2), ChunkPos::new(2, 2));
     let (tree, tile) = nearest_object_with_tag(&g, "tree").unwrap();
     let (x, y) = tile.center();
+    // Dry, still weather so the test is about fire, not rain.
+    g.env.weather = "core:clear".into();
+    g.env.weather_until = u64::MAX;
+    g.env.precip = 0.0;
+    g.env.wetness = 0.0;
+    g.env.wind_target = 0.0;
     g.ignite(x as i32, y as i32, 3);
     let fire = g.content.mat("core:fire").unwrap();
     let burning = |g: &Game| g.world.chunks.values().map(|c| c.mat.iter().flatten().filter(|&&m| m == fire).count()).sum::<usize>();
@@ -701,6 +708,7 @@ fn every_definition_can_be_edited_as_text() {
     roundtrip(&c.jobs);
     roundtrip(&c.creatures);
     roundtrip(&c.powers);
+    roundtrip(&c.tribes);
     let _: ClimateDef = pw_mods::parse_ron(&pw_mods::to_ron(&c.climate).unwrap()).unwrap();
     let _: WorldGenDef = pw_mods::parse_ron(&pw_mods::to_ron(&c.worldgen).unwrap()).unwrap();
 }
@@ -731,4 +739,154 @@ fn live_content_changes_apply_to_the_running_world() {
     let mut g = new_game(2);
     assert!(g.reload_mods().is_ok());
     run(&mut g, 10, |_| false);
+}
+
+fn tribe_report(g: &Game) -> String {
+    let mut s = String::new();
+    for t in &g.tribes.list {
+        let def = t.def(&g.content).unwrap();
+        s += &format!(
+            "  {} gen{} people {} beds {} food {:.1}d wood {} stone {} techs {:?} research {:?} focus {} culture {:?} projects {} done {} hunted {} born {} died {} gone {:?}\n",
+            t.name,
+            t.generation,
+            t.members.len(),
+            t.beds,
+            t.food_days(def, &g.content),
+            t.item_total(&g.content, "core:wood"),
+            t.item_total(&g.content, "core:stone"),
+            t.techs,
+            t.research,
+            pw_tribe::FOCUS_NAMES[t.focus as usize],
+            t.culture.map(|v| (v * 100.0).round() / 100.0),
+            t.projects.len(),
+            t.projects.iter().filter(|p| p.done).count(),
+            t.hunted,
+            t.born,
+            t.died,
+            t.gone,
+        );
+        let acts: Vec<String> = t.colony.pawns.iter().map(|p| p.activity().to_string()).collect();
+        s += &format!("    doing: {acts:?}\n");
+    }
+    s
+}
+
+#[test]
+#[ignore]
+fn debug_tribes() {
+    let mut g = new_game(7);
+    println!("start:\n{}", tribe_report(&g));
+    let t0 = std::time::Instant::now();
+    let days: u64 = std::env::var("PW_DAYS").ok().and_then(|d| d.parse().ok()).unwrap_or(12);
+    for day in 1..=days {
+        for _ in 0..DAY_TICKS {
+            g.step();
+        }
+        println!("day {day} ({:.1}s):\n{}", t0.elapsed().as_secs_f32(), tribe_report(&g));
+    }
+    for t in &g.tribes.list {
+        println!("{}:\n  {}", t.name, t.chronicle.join("\n  "));
+    }
+}
+
+#[test]
+#[ignore]
+fn bench_tribes() {
+    for with in [false, true] {
+        let mut g = new_game(7);
+        if !with {
+            g.tribes = Default::default();
+        }
+        let chunks = g.world.chunks.len();
+        let t0 = std::time::Instant::now();
+        for _ in 0..3000 {
+            g.step();
+        }
+        let a = t0.elapsed().as_secs_f64() * 1000.0 / 3000.0;
+        // Time just the tribes.
+        let mut tt = 0.0;
+        for _ in 0..1500 {
+            let content = g.content.clone();
+            let env = pw_tribe::TribeEnv { tick: g.tick, day_ticks: DAY_TICKS, dark: 0.0, walk: 1.0, keep_out: vec![] };
+            let t1 = std::time::Instant::now();
+            g.tribes.tick(&mut g.world, &content, &mut g.rng, &env, &mut g.life);
+            tt += t1.elapsed().as_secs_f64();
+            g.tick += 1;
+        }
+        let t2 = std::time::Instant::now();
+        for _ in 0..300 {
+            let content = g.content.clone();
+            pw_sim::tick(&mut g.world, &content, &mut g.rng, &g.sim, &pw_sim::SimEnv { wet: 0.0, wind: (0.0, 0.0), temp: 15.0 });
+        }
+        let sim = t2.elapsed().as_secs_f64() * 1000.0 / 300.0;
+        let t3 = std::time::Instant::now();
+        for _ in 0..300 {
+            let content = g.content.clone();
+            let env = pw_life::LifeEnv { tick: g.tick, day_ticks: DAY_TICKS, temp: 15.0, dark: 0.0, walk: 1.0 };
+            g.life.tick(&mut g.world, &content, &mut g.rng, &env);
+        }
+        let life = t3.elapsed().as_secs_f64() * 1000.0 / 300.0;
+        println!("tribes {with}: chunks {chunks} step {a:.3} ms, tribes alone {:.3} ms, sim {sim:.3} ms, life {life:.3} ms ({} animals)", tt * 1000.0 / 1500.0, g.life.alive());
+    }
+}
+
+#[test]
+fn tribes_settle_build_and_grow() {
+    let mut g = new_game(7);
+    assert_eq!(g.tribes.alive(), 2, "two tribes should settle near the colony");
+    for t in g.tribes.living() {
+        assert!(t.center.chebyshev(g.home) >= 30, "tribes keep their distance");
+        assert!(t.members.len() >= 4);
+    }
+    let culture0: Vec<[f32; pw_tribe::FOCI]> = g.tribes.list.iter().map(|t| t.culture).collect();
+    run(&mut g, (DAY_TICKS * 2 + 600) as u32, |_| false);
+    for (i, t) in g.tribes.list.iter().take(2).enumerate() {
+        let story = t.chronicle.join(" | ");
+        assert!(story.contains("finished a campfire"), "{}: {story}", t.name);
+        assert!(t.beds >= 2, "{} should have built a hut with beds: {story}", t.name);
+        assert!(t.gone.is_none());
+        // A day's results have shifted what it values.
+        let moved: f32 = (0..pw_tribe::FOCI).map(|f| (t.culture[f] - culture0[i][f]).abs()).sum();
+        assert!(moved > 0.0, "{} culture never changed", t.name);
+    }
+    // Their people are drawn and saved with everything else.
+    assert!(g.all_pawns().any(|(o, _)| o > 0));
+}
+
+#[test]
+fn tribes_hunt_research_and_split() {
+    let mut g = new_game(11);
+    g.tribes = Default::default();
+    let id = g.found_tribe("core:forest_folk", None, 10).expect("tribe founded");
+    // Enough to eat for the band that leaves, and game to hunt.
+    let center = g.tribes.get(id).unwrap().center;
+    let content = g.content.clone();
+    let berries = content.items.idx("core:berries").unwrap();
+    {
+        let t = g.tribes.list.iter_mut().find(|t| t.id == id).unwrap();
+        t.techs.push("hunting".into());
+        t.colony.items.add(&g.world, &content, berries, 30, center.offset(3, 0));
+    }
+    let before = g.tribes.get(id).unwrap().culture;
+    run(&mut g, DAY_TICKS as u32 + 10, |_| false);
+    let parent = g.tribes.get(id).unwrap();
+    let story = parent.chronicle.join(" | ");
+    let child = g.tribes.list.iter().find(|t| t.parent == Some(id)).unwrap_or_else(|| panic!("no daughter tribe: {story}"));
+    assert_eq!(child.generation, 1);
+    assert!(child.techs.contains(&"hunting".to_string()), "knowledge is passed on");
+    assert!(child.members.len() >= 3);
+    assert_ne!(child.culture, before, "a daughter culture mutates");
+    assert!(parent.members.len() + child.members.len() >= 10);
+    // Starve the parent of food: its hunters go out for rabbits.
+    let meat = content.items.idx("core:meat").unwrap();
+    {
+        let t = g.tribes.list.iter_mut().find(|t| t.id == id).unwrap();
+        let stacks: Vec<(u32, u32)> = t.colony.items.stacks.values().filter(|s| s.item == berries || s.item == meat).map(|s| (s.id, s.count)).collect();
+        for (s, n) in stacks {
+            t.colony.items.take(s, n);
+        }
+    }
+    g.spawn_group("core:rabbit", center.offset(6, 6), 6);
+    let caught = run(&mut g, DAY_TICKS as u32, |g| g.tribes.get(id).is_some_and(|t| t.hunted > 0));
+    assert!(caught, "hungry hunters should catch something: {}", g.tribes.get(id).unwrap().chronicle.join(" | "));
 }

@@ -92,4 +92,7 @@
     PowerDef(id: "core:spawn_colonist", name: "Colonist", category: "Life", radius: 2,
         description: "A new colonist joins you.",
         effects: [Spawn(creature: "core:colonist", count: 1)]),
+    PowerDef(id: "core:found_tribe", name: "Found a tribe", category: "Life", radius: 4,
+        description: "A small band settles here. They gather, build, learn and grow on their own, and in time send out bands of their own.",
+        effects: [Tribe(tribe: "core:forest_folk", members: 4), Flash]),
 ]

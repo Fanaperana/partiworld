@@ -10,6 +10,7 @@ pw_world.workspace = true
 pw_colony.workspace = true
 pw_game.workspace = true
 pw_life.workspace = true
+pw_tribe.workspace = true
 serde.workspace = true
 bincode.workspace = true
 lz4_flex.workspace = true

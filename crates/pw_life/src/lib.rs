@@ -70,6 +70,8 @@ pub enum Death {
     Eaten,
     Burnt,
     Froze,
+    /// Killed by people (tribe hunters).
+    Hunted,
 }
 
 impl Death {
@@ -80,6 +82,7 @@ impl Death {
             Death::Eaten => "was eaten",
             Death::Burnt => "burnt",
             Death::Froze => "froze",
+            Death::Hunted => "was hunted",
         }
     }
 }
@@ -137,9 +140,9 @@ pub struct Species {
     pub alive: u32,
     pub born: u32,
     pub died: u32,
-    /// Deaths by cause: starved, old age, eaten, burnt, froze.
+    /// Deaths by cause: starved, old age, eaten, burnt, froze, hunted.
     #[serde(default)]
-    pub causes: [u32; 5],
+    pub causes: [u32; 6],
     pub max_generation: u32,
     pub first_tick: u64,
     pub extinct_tick: Option<u64>,
@@ -325,7 +328,7 @@ impl Life {
             alive: 0,
             born: 0,
             died: 0,
-            causes: [0; 5],
+            causes: [0; 6],
             max_generation: 0,
             first_tick: tick,
             extinct_tick: None,
@@ -385,6 +388,13 @@ impl Life {
             s.alive += 1;
         }
         Some(id)
+    }
+
+    /// Kill a creature (it is removed on the next tick). Returns its def and position.
+    pub fn kill(&mut self, id: u32, cause: Death) -> Option<(usize, (f32, f32))> {
+        let c = self.creatures.iter_mut().find(|c| c.id == id && c.dead.is_none())?;
+        c.dead = Some(cause);
+        Some((c.def, c.pos))
     }
 
     /// Living creatures of a def (all its species together).
@@ -849,7 +859,7 @@ impl Life {
                             alive: 0,
                             born: 0,
                             died: 0,
-                            causes: [0; 5],
+                            causes: [0; 6],
                             max_generation: generation,
                             first_tick: env.tick,
                             extinct_tick: None,

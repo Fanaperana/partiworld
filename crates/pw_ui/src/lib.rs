@@ -54,6 +54,9 @@ pub struct UiState {
     pub show_editor: bool,
     pub show_help: bool,
     pub show_work: bool,
+    pub show_tribes: bool,
+    /// Move the camera here once (e.g. "Go to" a tribe).
+    pub goto: Option<Vec2>,
     pub show_life: bool,
     pub show_data: bool,
     pub data: DataEditor,
@@ -87,6 +90,8 @@ impl Default for UiState {
             show_editor: false,
             show_help: true,
             show_work: false,
+            show_tribes: false,
+            goto: None,
             show_life: false,
             show_data: false,
             data: DataEditor::default(),
@@ -280,6 +285,9 @@ fn camera_keys(
     if keys.just_pressed(KeyCode::KeyL) {
         ui.show_life = !ui.show_life;
     }
+    if keys.just_pressed(KeyCode::KeyK) {
+        ui.show_tribes = !ui.show_tribes;
+    }
     if keys.just_pressed(KeyCode::F2) {
         ui.show_data = !ui.show_data;
     }
@@ -292,7 +300,7 @@ fn camera_keys(
 }
 
 fn follow_camera(
-    ui: Res<UiState>,
+    mut ui: ResMut<UiState>,
     game: Res<GameRes>,
     mut cam: Query<&mut Transform, With<MainCamera>>,
     mut settings: ResMut<RenderSettings>,
@@ -301,6 +309,14 @@ fn follow_camera(
     // The render side fades roofs around the cursor.
     if settings.cursor != ui.cursor {
         settings.cursor = ui.cursor;
+    }
+    if let Some(at) = ui.goto.take() {
+        ui.follow = false;
+        if let Ok(mut t) = cam.single_mut() {
+            t.translation.x = at.x;
+            t.translation.y = at.y;
+        }
+        return;
     }
     if !ui.follow {
         return;
@@ -542,6 +558,101 @@ fn tool_button(ui: &mut egui::Ui, state: &mut UiState, tool: Tool, label: &str) 
     }
 }
 
+/// A small line chart of a history, scaled to its own maximum.
+fn sparkline(ui: &mut egui::Ui, history: &[u32], color: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(110.0, 20.0), egui::Sense::hover());
+    let max = history.iter().copied().max().unwrap_or(1).max(1) as f32;
+    let n = history.len().max(2) as f32;
+    let pts: Vec<egui::Pos2> = history
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| egui::pos2(rect.left() + rect.width() * i as f32 / (n - 1.0), rect.bottom() - rect.height() * v as f32 / max))
+        .collect();
+    if pts.len() > 1 {
+        ui.painter().add(egui::Shape::line(pts, egui::Stroke::new(1.5, color)));
+    }
+}
+
+fn color32(hex: &str) -> egui::Color32 {
+    let c = parse_color(hex).unwrap_or([200, 200, 200, 255]);
+    egui::Color32::from_rgb(c[0], c[1], c[2])
+}
+
+/// Every tribe: how it lives, what it has learned and discovered, and its story.
+fn tribes_window(ui: &mut egui::Ui, g: &Game, goto: &mut Option<Vec2>) {
+    ui.label(
+        egui::RichText::new(
+            "Villages that live on their own. Each learns which work pays off, discovers techs, grows when fed and housed, \
+             and sends bands off to found daughter tribes that carry its culture on, a little changed.",
+        )
+        .weak(),
+    );
+    if g.tribes.list.is_empty() {
+        ui.label("No tribes yet. The 'Found a tribe' power (Life) starts one.");
+        return;
+    }
+    let mut list: Vec<&pw_tribe::Tribe> = g.tribes.list.iter().collect();
+    list.sort_by_key(|t| (t.gone.is_some(), std::cmp::Reverse(t.members.len())));
+    egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
+        for (i, t) in list.into_iter().enumerate() {
+            let Some(def) = t.def(&g.content) else { continue };
+            let color = color32(&t.color);
+            let mut title = egui::RichText::new(format!("The {}  ({} people)", t.name, t.members.len())).color(color).strong();
+            if t.gone.is_some() {
+                title = egui::RichText::new(format!("The {} (gone)", t.name)).weak().strikethrough();
+            }
+            egui::CollapsingHeader::new(title).id_salt(("tribe", t.id)).default_open(i == 0).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let fd = t.food_days(def, &g.content);
+                    ui.label(format!(
+                        "{} beds · food for {:.0} days · wood {} · stone {}",
+                        t.beds,
+                        fd.min(99.0),
+                        t.item_total(&g.content, &def.wood),
+                        t.item_total(&g.content, &def.stone)
+                    ));
+                    if t.gone.is_none() && ui.small_button("Go to").clicked() {
+                        let (x, y) = t.center.center();
+                        *goto = Some(Vec2::new(x, y));
+                    }
+                });
+                let from = t.parent.and_then(|p| g.tribes.get(p)).map(|p| format!("split from the {}, ", p.name)).unwrap_or_default();
+                let days = (g.tick.saturating_sub(t.founded)) as f32 / pw_game::DAY_TICKS as f32;
+                ui.label(format!(
+                    "{} · {from}generation {} · founded {days:.0} days ago · {} born, {} died, {} animals hunted",
+                    def.name, t.generation, t.born, t.died, t.hunted
+                ));
+                if t.gone.is_none() {
+                    ui.label(format!("Now: {}. They value {} most.", pw_tribe::FOCUS_NAMES[t.focus as usize].to_lowercase(), t.values().join(" and ")));
+                }
+                ui.horizontal(|ui| {
+                    ui.label("People:");
+                    sparkline(ui, &t.history, color);
+                });
+                ui.label(egui::RichText::new("Culture (learned from what paid off)").small().strong());
+                egui::Grid::new(("culture", t.id)).spacing([8.0, 2.0]).show(ui, |ui| {
+                    for f in 0..pw_tribe::FOCI {
+                        ui.label(egui::RichText::new(pw_tribe::VALUE_NAMES[f]).small());
+                        ui.add(egui::ProgressBar::new(t.culture[f] / 3.0).desired_width(120.0).text(format!("{:.2}", t.culture[f])));
+                        ui.end_row();
+                    }
+                });
+                let traits: Vec<String> = (0..pw_tribe::TRAITS).map(|k| format!("{} {:.2}", pw_tribe::TRAIT_NAMES[k], t.traits[k])).collect();
+                ui.label(egui::RichText::new(format!("Traits: {}", traits.join(", "))).small());
+                let known: Vec<&str> = t.known_techs(def).iter().map(|x| x.name.as_str()).collect();
+                ui.label(format!("Knows: {}", known.join(", ")));
+                if let Some(r) = t.research.as_ref().and_then(|r| def.techs.iter().find(|x| &x.id == r)) {
+                    ui.add(egui::ProgressBar::new((t.points / r.points.max(1.0)).min(1.0)).desired_width(220.0).text(format!("Discovering {}", r.name)));
+                }
+                ui.label(egui::RichText::new("Story").small().strong());
+                for line in t.chronicle.iter().rev().take(8) {
+                    ui.label(egui::RichText::new(line).small().weak());
+                }
+            });
+        }
+    });
+}
+
 /// Every species that has lived here: how it's doing and how it has changed.
 fn life_window(ui: &mut egui::Ui, g: &Game) {
     let life = &g.life;
@@ -562,7 +673,7 @@ fn life_window(ui: &mut egui::Ui, g: &Game) {
     list.sort_by_key(|s| (s.extinct_tick.is_some(), std::cmp::Reverse(s.alive)));
     egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
         egui::Grid::new("life_grid").striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
-            for h in ["Species", "Alive", "Trend", "Born", "Died (eaten / starved / old / burnt / froze)", "Gen", "Speed", "Size", "Cold", "Fertile"] {
+            for h in ["Species", "Alive", "Trend", "Born", "Died (eaten / starved / old / burnt / froze / hunted)", "Gen", "Speed", "Size", "Cold", "Fertile"] {
                 ui.label(egui::RichText::new(h).small().strong());
             }
             ui.end_row();
@@ -589,7 +700,7 @@ fn life_window(ui: &mut egui::Ui, g: &Game) {
                 }
                 ui.label(s.born.to_string());
                 let c = s.causes;
-                ui.label(format!("{}  ({} / {} / {} / {} / {})", s.died, c[2], c[0], c[1], c[3], c[4]));
+                ui.label(format!("{}  ({} / {} / {} / {} / {} / {})", s.died, c[2], c[0], c[1], c[3], c[4], c[5]));
                 ui.label(s.max_generation.to_string());
                 match avg.get(&s.id) {
                     Some((sum, n)) => {
@@ -879,6 +990,9 @@ fn ui_panels(
                 if ui.small_button("Life (L)").clicked() {
                     st.show_life = !st.show_life;
                 }
+                if ui.small_button("Tribes (K)").clicked() {
+                    st.show_tribes = !st.show_tribes;
+                }
             });
             let mut focus = None;
             for p in &g.colony.pawns {
@@ -953,6 +1067,10 @@ fn ui_panels(
             if let Some(p) = pawn_at(g, cur, 6.0).and_then(|id| g.colony.pawns.iter().find(|p| p.id == id)) {
                 lines.push(format!("{} - {}", p.name, p.activity()));
             }
+            if let Some((t, p)) = g.tribe_pawn_at((cur.x, cur.y), 6.0) {
+                lines.extend(g.describe_tribe_pawn(t, p));
+                lines.push(format!("Their values: {}", t.values().join(", ")));
+            }
             if let Some(c) = g.life.at((cur.x, cur.y), 6.0) {
                 let sp = g.life.species_of(c.species).map(|s| s.name.clone()).unwrap_or_default();
                 lines.push(format!("{sp} - {}", c.activity()));
@@ -1002,7 +1120,7 @@ fn ui_panels(
             ui.label("  Plant: saplings and sprouts grow into trees and bushes.");
             ui.label("  God powers: paint any material, drop objects, start fires.");
             ui.label("Keys: C chop, M mine, G harvest, X cancel, Z stockpile, B build, T plant.");
-            ui.label("Click a colonist to select; F follows them. P: work priorities. L: wild life and evolution.");
+            ui.label("Click a colonist to select; F follows them. P: work priorities. L: wild life and evolution. K: tribes.");
             ui.label("Right click or Esc: back to Inspect. R: hide canopies and roofs. V: see-through roofs.");
             ui.label("F5 save, F9 load. Object editor: paint your own trees, houses and props.");
         });
@@ -1024,6 +1142,16 @@ fn ui_panels(
         let mut open = true;
         egui::Window::new("Life").open(&mut open).default_pos([260.0, 140.0]).show(&ctx, |ui| life_window(ui, g));
         st.show_life = open;
+    }
+
+    if st.show_tribes {
+        let mut open = true;
+        let mut goto = None;
+        egui::Window::new("Tribes").open(&mut open).default_pos([300.0, 120.0]).default_width(420.0).show(&ctx, |ui| tribes_window(ui, g, &mut goto));
+        st.show_tribes = open;
+        if goto.is_some() {
+            st.goto = goto;
+        }
     }
 
     if st.show_work {

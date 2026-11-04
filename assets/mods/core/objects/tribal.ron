@@ -1,0 +1,45 @@
+// Things tribes make. The player can build the bedroll too.
+[
+    ObjectDef(
+        id: "core:totem",
+        name: "Village totem",
+        tags: ["totem", "flammable"],
+        anchor: Tile,
+        shape: Pattern(
+            palette: {'w': "core:totem_wood", 'r': "core:totem_paint", 'e': "core:totem_eye"},
+            layers: [PatternLayer(layer: Solid, rows: [
+                "..rrrr..",
+                ".rwwwwr.",
+                ".wewwew.",
+                ".wwrrww.",
+                "..wwww..",
+                "..wrrw..",
+                "..wwww..",
+                "...ww...",
+            ])],
+        ),
+        break_fraction: 0.4,
+        drops: [DropDef(item: "core:wood", min: 2, max: 4)],
+    ),
+    ObjectDef(
+        id: "core:bedroll",
+        name: "Bedroll",
+        tags: ["furniture", "bed", "flammable"],
+        anchor: Tile,
+        shape: Pattern(
+            palette: {'s': "core:straw", 'c': "core:bed_cloth"},
+            layers: [PatternLayer(layer: Floor, rows: [
+                "........",
+                ".ssssss.",
+                ".sccccs.",
+                ".sccccs.",
+                ".sccccs.",
+                ".sccccs.",
+                ".ssssss.",
+                "........",
+            ])],
+        ),
+        break_fraction: 0.5,
+        build: BuildDef(cost: [("core:wood", 2)], work: 80, category: "Furniture"),
+    ),
+]

@@ -288,6 +288,7 @@ fn load_patches(m: &ModInfo, c: &mut Content, report: &mut LoadReport) {
                 "reaction" => apply_patch(&mut c.reactions, id, &p),
                 "job" => apply_patch(&mut c.jobs, id, &p),
                 "creature" => apply_patch(&mut c.creatures, id, &p),
+                "tribe" => apply_patch(&mut c.tribes, id, &p),
                 _ => Err(format!("unknown patch kind '{kind}'")),
             };
             if let Err(e) = r {
@@ -330,6 +331,7 @@ pub fn load_mod(m: &ModInfo, c: &mut Content, host: &mut ScriptHost, report: &mu
     load_dir(m, "jobs", &mut c.jobs, report);
     load_dir(m, "creatures", &mut c.creatures, report);
     load_dir(m, "powers", &mut c.powers, report);
+    load_dir(m, "tribes", &mut c.tribes, report);
     let wg = m.path.join("worldgen.ron");
     if let Ok(text) = fs::read_to_string(&wg) {
         match parse_ron::<WorldGenDef>(&text) {

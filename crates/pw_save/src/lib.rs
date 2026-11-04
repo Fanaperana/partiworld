@@ -11,7 +11,7 @@ use pw_game::Game;
 use pw_world::*;
 use serde::{Deserialize, Serialize};
 
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize)]
 struct Tables {
@@ -35,6 +35,8 @@ struct SaveFile {
     colony: Colony,
     env: pw_game::Env,
     life: pw_life::Life,
+    tribes: pw_tribe::Tribes,
+    home: TilePos,
 }
 
 pub fn save(game: &Game, path: &Path) -> Result<usize, String> {
@@ -65,6 +67,8 @@ pub fn save(game: &Game, path: &Path) -> Result<usize, String> {
         colony: game.colony.clone(),
         env: game.env.clone(),
         life: game.life.clone(),
+        tribes: game.tribes.clone(),
+        home: game.home,
     };
     let bytes = bincode::serialize(&file).map_err(|e| e.to_string())?;
     if let Some(dir) = path.parent() {
@@ -142,8 +146,46 @@ pub fn load(game: &mut Game, path: &Path) -> Result<Vec<String>, String> {
     }
     world.objects = store;
 
-    // Colony.
+    let map = Maps { items: &items, jobs: &jobs, objs: &objs, creatures: &creatures };
     let mut colony = file.colony;
+    remap_colony(&mut colony, &c, &map);
+    let mut tribes = file.tribes;
+    for t in &mut tribes.list {
+        remap_colony(&mut t.colony, &c, &map);
+    }
+    tribes.list.retain(|t| c.tribes.get(&t.def_id).is_some() || t.gone.is_some());
+    tribes.after_load();
+
+    game.replace_state(world, colony, file.seed, file.tick, file.rng);
+    game.env = file.env;
+    game.tribes = tribes;
+    game.home = file.home;
+    // Wild creatures: find their def again by their species' creature id.
+    let mut life = file.life;
+    let defs: HashMap<u32, Option<usize>> = life.species.iter().map(|s| (s.id, c.creatures.idx(&s.def_id))).collect();
+    life.creatures.retain_mut(|cr| match defs.get(&cr.species).copied().flatten() {
+        Some(d) => {
+            cr.def = d;
+            cr.path.clear();
+            true
+        }
+        None => false,
+    });
+    game.life = life;
+    Ok(warnings)
+}
+
+/// Old -> new content indices.
+struct Maps<'a> {
+    items: &'a [Option<usize>],
+    jobs: &'a [Option<usize>],
+    objs: &'a [Option<usize>],
+    creatures: &'a [Option<usize>],
+}
+
+/// Point a loaded colony (the player's or a tribe's) at the current content.
+fn remap_colony(colony: &mut Colony, c: &Content, m: &Maps) {
+    let (items, jobs, objs, creatures) = (m.items, m.jobs, m.objs, m.creatures);
     let item = |i: usize| items.get(i).copied().flatten();
     colony.items.stacks.retain(|_, s| match item(s.item) {
         Some(n) => {
@@ -191,20 +233,4 @@ pub fn load(game: &mut Game, path: &Path) -> Result<Vec<String>, String> {
         d.reserved = None;
     }
     colony.after_load();
-
-    game.replace_state(world, colony, file.seed, file.tick, file.rng);
-    game.env = file.env;
-    // Wild creatures: find their def again by their species' creature id.
-    let mut life = file.life;
-    let defs: HashMap<u32, Option<usize>> = life.species.iter().map(|s| (s.id, c.creatures.idx(&s.def_id))).collect();
-    life.creatures.retain_mut(|cr| match defs.get(&cr.species).copied().flatten() {
-        Some(d) => {
-            cr.def = d;
-            cr.path.clear();
-            true
-        }
-        None => false,
-    });
-    game.life = life;
-    Ok(warnings)
 }

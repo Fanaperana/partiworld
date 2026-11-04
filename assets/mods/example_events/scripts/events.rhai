@@ -4,6 +4,8 @@
 //   on_season(ctx, season)  when the season changes
 //   on_weather(ctx, id)     when the weather changes
 //   on_new_species(ctx, name), on_extinct(ctx, name)
+//   on_tribe_founded(ctx, name), on_discovery(ctx, tribe, tech), on_tribe_lost(ctx, name)
+//   ctx.count("tribes") is how many tribes are alive.
 
 // A random spot `min`..`max` particles away from the colony.
 fn near_colony(ctx, min, max) {
@@ -34,4 +36,18 @@ fn on_season(ctx, season) {
 
 fn on_weather(ctx, id) {
     if id == "core:storm" { ctx.message("A thunderstorm rolls in. Watch for lightning fires."); }
+}
+
+// Tribes: a word about each new village and discovery.
+fn on_discovery(ctx, tribe, tech) {
+    if tech == "Masonry" { ctx.message("The " + tribe + " have learned to build in stone. Their houses will stand through fire."); }
+}
+
+fn on_tribe_lost(ctx, name) {
+    // When the last tribe dies out, new people wander in after a while.
+    if ctx.count("tribes") == 0 && ctx.rand() < 0.5 {
+        let p = near_colony(ctx, 360, 480);
+        ctx.power("core:found_tribe", p[0], p[1], 4);
+        ctx.message("Wanderers from far away settle where the " + name + " once lived.");
+    }
 }

@@ -44,14 +44,25 @@ pub struct SimClock {
     /// Colonist positions before the latest tick, so drawing can glide
     /// between ticks instead of jumping (the sim runs at a different rate
     /// than the screen).
-    prev: HashMap<u32, (f32, f32)>,
+    /// Keyed by `pawn_key` (owner + pawn id).
+    prev: HashMap<u64, (f32, f32)>,
     prev_life: HashMap<u32, (f32, f32)>,
+}
+
+/// One key for any person: owner 0 is the player's colony, else a tribe id.
+pub fn pawn_key(owner: u32, id: u32) -> u64 {
+    ((owner as u64) << 32) | id as u64
 }
 
 impl SimClock {
     /// Where to draw a colonist this frame: between its last two tick positions.
     pub fn draw_pos(&self, p: &pw_colony::Pawn) -> Vec2 {
-        self.glide(self.prev.get(&p.id), p.pos)
+        self.glide(self.prev.get(&pawn_key(0, p.id)), p.pos)
+    }
+
+    /// Same for anyone's people (`owner` as in `Game::all_pawns`).
+    pub fn draw_pos_of(&self, owner: u32, p: &pw_colony::Pawn) -> Vec2 {
+        self.glide(self.prev.get(&pawn_key(owner, p.id)), p.pos)
     }
 
     /// Same for a wild creature.
@@ -132,12 +143,12 @@ struct ChunkView {
 #[derive(Resource, Default)]
 struct Views {
     chunks: HashMap<ChunkPos, ChunkView>,
-    pawns: HashMap<u32, (Entity, Entity, Entity)>,
+    pawns: HashMap<u64, (Entity, Entity, Entity)>,
     shadow_img: Option<Handle<Image>>,
     /// Wild creature id -> (sprite entity, image key).
     animals: HashMap<u32, (Entity, (usize, u8, u8))>,
     animal_images: HashMap<(usize, u8, u8), Handle<Image>>,
-    items: HashMap<u32, (Entity, usize, TilePos)>,
+    items: HashMap<u64, (Entity, usize, TilePos)>,
     blueprints: HashMap<u32, Entity>,
     item_images: HashMap<usize, Handle<Image>>,
     bp_images: HashMap<(usize, u64), (Handle<Image>, i32, i32, u32, u32)>,
@@ -265,7 +276,7 @@ fn run_sim(time: Res<Time>, mut clock: ResMut<SimClock>, mut game: ResMut<GameRe
     clock.acc += time.delta_secs() * TPS * m;
     let mut n = 0;
     while clock.acc >= 1.0 && n < 24 {
-        clock.prev = game.0.colony.pawns.iter().map(|p| (p.id, p.pos)).collect();
+        clock.prev = game.0.all_pawns().map(|(o, p)| (pawn_key(o, p.id), p.pos)).collect();
         clock.prev_life = game.0.life.creatures.iter().map(|c| (c.id, c.pos)).collect();
         game.0.step();
         clock.acc -= 1.0;
@@ -631,7 +642,7 @@ fn see_through_holes(g: &Game, settings: &RenderSettings) -> Vec<(f32, f32, f32)
             holes.push((c.x.round(), c.y.round(), HOLE_CURSOR));
         }
     }
-    for p in &g.colony.pawns {
+    for (_, p) in g.all_pawns() {
         if covered(p.pos.0, p.pos.1) {
             holes.push((p.pos.0.round(), p.pos.1.round(), HOLE_PAWN));
         }
@@ -713,20 +724,21 @@ fn check_content(views: &mut Views, content: &std::sync::Arc<Content>) {
 fn sync_items(mut commands: Commands, game: Res<GameRes>, mut views: ResMut<Views>, mut images: ResMut<Assets<Image>>) {
     let g = &game.0;
     check_content(&mut views, &g.content);
-    let live: HashSet<u32> = g.colony.items.stacks.keys().copied().collect();
-    let gone: Vec<u32> = views.items.keys().filter(|k| !live.contains(k)).copied().collect();
+    let live: HashSet<u64> = g.all_items().map(|(o, s)| pawn_key(o, s.id)).collect();
+    let gone: Vec<u64> = views.items.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
         let (e, _, _) = views.items.remove(&id).unwrap();
         commands.entity(e).despawn();
     }
-    for s in g.colony.items.stacks.values() {
+    for (owner, s) in g.all_items() {
+        let key = pawn_key(owner, s.id);
         let (x, y) = s.tile.center();
         let pos = Transform::from_xyz(x, y, 3.0);
-        match views.items.get(&s.id) {
+        match views.items.get(&key) {
             Some(&(_, item, tile)) if item == s.item && tile == s.tile => {}
             Some(&(e, item, _)) if item == s.item => {
                 commands.entity(e).insert(pos);
-                views.items.insert(s.id, (e, item, s.tile));
+                views.items.insert(key, (e, item, s.tile));
             }
             other => {
                 if let Some(&(e, _, _)) = other {
@@ -734,7 +746,7 @@ fn sync_items(mut commands: Commands, game: Res<GameRes>, mut views: ResMut<View
                 }
                 let img = item_image(&mut views, &mut images, &g.content, s.item);
                 let e = commands.spawn((Sprite::from_image(img), pos, ItemSprite)).id();
-                views.items.insert(s.id, (e, s.item, s.tile));
+                views.items.insert(key, (e, s.item, s.tile));
             }
         }
     }
@@ -800,20 +812,21 @@ fn sync_pawns(
     clock: Res<SimClock>,
 ) {
     let g = &game.0;
-    let live: HashSet<u32> = g.colony.pawns.iter().map(|p| p.id).collect();
-    let gone: Vec<u32> = views.pawns.keys().filter(|k| !live.contains(k)).copied().collect();
+    let live: HashSet<u64> = g.all_pawns().map(|(o, p)| pawn_key(o, p.id)).collect();
+    let gone: Vec<u64> = views.pawns.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
         let (a, b, sh) = views.pawns.remove(&id).unwrap();
         commands.entity(a).despawn();
         commands.entity(b).despawn();
         commands.entity(sh).despawn();
     }
-    for p in &g.colony.pawns {
-        let d = clock.draw_pos(p);
+    for (owner, p) in g.all_pawns() {
+        let key = pawn_key(owner, p.id);
+        let d = clock.draw_pos_of(owner, p);
         let pos = Transform::from_xyz(d.x, d.y, 10.0);
         let carry_pos = Transform::from_xyz(d.x + 3.0, d.y + 4.0, 11.0);
         let shadow_pos = Transform::from_xyz(d.x + 0.5, d.y - 3.5, 9.0);
-        match views.pawns.get(&p.id) {
+        match views.pawns.get(&key) {
             Some(&(e, c, sh)) => {
                 if let Ok(mut t) = bodies.get_mut(e) {
                     t.translation = pos.translation;
@@ -852,7 +865,7 @@ fn sync_pawns(
                     }
                 };
                 let sh = commands.spawn((Sprite::from_image(shadow), shadow_pos, ShadowSprite)).id();
-                views.pawns.insert(p.id, (e, c, sh));
+                views.pawns.insert(key, (e, c, sh));
             }
         }
     }
@@ -955,6 +968,17 @@ fn draw_zones(game: Res<GameRes>, settings: Res<RenderSettings>, mut gizmos: Giz
     for t in &g.colony.stockpile {
         let (x, y) = t.center();
         gizmos.rect_2d(Isometry2d::from_translation(Vec2::new(x, y)), size, Color::srgba(1.0, 0.85, 0.3, 0.35));
+    }
+    // Tribe lands: a faint ring in the tribe's colour.
+    for tr in g.tribes.living() {
+        let c = parse_color(&tr.color).unwrap_or([255, 255, 255, 255]);
+        let (x, y) = tr.center.center();
+        let r = (tr.radius as f32 + 0.5) * TILE as f32;
+        gizmos.circle_2d(Isometry2d::from_translation(Vec2::new(x, y)), r, Color::srgba_u8(c[0], c[1], c[2], 70));
+        for t in &tr.colony.stockpile {
+            let (x, y) = t.center();
+            gizmos.rect_2d(Isometry2d::from_translation(Vec2::new(x, y)), size, Color::srgba_u8(c[0], c[1], c[2], 50));
+        }
     }
     for (t, d) in &g.colony.designations {
         let (x, y) = t.center();

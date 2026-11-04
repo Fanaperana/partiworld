@@ -2,7 +2,7 @@
 
 **A top-down colony sim where the whole world is made of particles.**
 
-Every tree, rock, wall, roof and patch of grass is a group of tiny particles. You can chop a tree and watch it wear away bit by bit, mine a hillside cell by cell, or set a dry meadow alight and watch the wind carry the fire. You play it like RimWorld: mark the work, plan the buildings, and your colonists get on with it. You can also play it like WorldBox: drop meteors, pour lava, flood valleys, and release animals that breed, learn and evolve into new species. The world is generated from a seed, it goes on forever, and it changes with the seasons.
+Every tree, rock, wall, roof and patch of grass is a group of tiny particles. You can chop a tree and watch it wear away bit by bit, mine a hillside cell by cell, or set a dry meadow alight and watch the wind carry the fire. You play it like RimWorld: mark the work, plan the buildings, and your colonists get on with it. You can also play it like WorldBox: drop meteors, pour lava, flood valleys, release animals that breed, learn and evolve into new species, and watch tribes settle the land, learn, invent and spread. The world is generated from a seed, it goes on forever, and it changes with the seasons.
 
 Built in Rust with [Bevy](https://bevyengine.org/). Everything is moddable with data files and [Rhai](https://rhai.rs/) scripts.
 
@@ -34,6 +34,9 @@ Built in Rust with [Bevy](https://bevyengine.org/). Everything is moddable with 
     <td align="center"><sub>A meteor crater with a molten core, and poured lava</sub></td>
   </tr>
 </table>
+
+![A tribe's village of thatch huts, and the Tribes window showing what it has learned](docs/screenshots/tribes.png)
+<p align="center"><sub>A tribe's village. The Tribes window (K) shows what it values, what it knows and its story.</sub></p>
 
 ## Play
 
@@ -70,13 +73,21 @@ The number is the world seed; leave it out for the default world. The first buil
 - **New species:** when a lineage drifts far enough from its ancestors it gets a name of its own, like *Woolly Rabbit* or *Swift Wolf*, and shows up in the **Life** window (L) with its population trend and family tree.
 - **Plants spread:** oaks, pines and berry bushes seed new saplings nearby, so forests creep outward and regrow after a fire.
 
+**Tribes that build**
+- **Villages of their own.** A couple of tribes already live near your colony when you land, and the *Found a tribe* power starts more. Their people really do the work, with the same jobs as your colonists: they pick berries, cut trees, break rocks, haul, and build huts wall by wall, then roof them.
+- **A chief that decides.** Every in-game hour the chief looks at what the village needs (food, wood, stone, beds, a campfire) and gives orders. People go home to sleep at night.
+- **Culture is learned.** Each tribe values each kind of work (foraging, woodcraft, stonework, building, hunting, farming) differently. Every day it checks whether it is doing better than yesterday and credits the work it put the most effort into. Hard times teach it to value food.
+- **Discoveries.** Tribes research techs: Hunting, Stonework, Farming, Carpentry, Masonry. Each one unlocks new work (hunting game, planting berry fields, quarrying) or new buildings (longhouses with floors, stone houses that don't burn). What a tribe studies follows what it values.
+- **They grow and spread.** Tribes with food and free beds have children. People grow old and die, or starve if the stores run out. When a village gets big, a band leaves to found a daughter tribe nearby. The band takes its share of the food and all the knowledge, and its culture and traits (fertility, wanderlust, boldness, curiosity) are a little changed. Over time, neighbouring tribes value different things.
+- The **Tribes** window (K) shows each tribe's people over time, culture, traits, known techs, research progress and story, with a button to jump to its village.
+
 **Physics**
 - Water fills dug channels, freezes into walkable ice in winter and thaws in spring.
 - Lava flows, sets things alight, boils water into steam, turns sand into glass and cools into basalt.
 - Smoke and steam drift with the wind and fade.
 
 **Play god**
-- **Powers:** lightning, rain, thunderstorm, blizzard, clear sky, meteor, earthquake, lava, firestorm, water, dig, raise rock, fertilize, freeze. You can also release rabbits, deer, wolves or colonists. Every power is a data file, so mods can add more.
+- **Powers:** lightning, rain, thunderstorm, blizzard, clear sky, meteor, earthquake, lava, firestorm, water, dig, raise rock, fertilize, freeze. You can also release rabbits, deer, wolves or colonists, or found a tribe. Every power is a data file, so mods can add more.
 - Paint any material, drop any object, start fires.
 - Draw your own trees, props and buildings in the **object editor**. They're saved as a mod and work in the game right away.
 - Change anything in the **data editor** (F2): open any material, object, reaction, creature, power, biome, the climate or world generation as text. Edit it and apply it to the running world, or save it to your own mod.
@@ -93,7 +104,7 @@ The number is the world seed; leave it out for the default world. The first buil
 | C / M / G / X | Chop, mine, harvest, cancel orders |
 | Z / B / T | Stockpile zone, build (last pick), plant (last pick) |
 | Click a colonist, F | Select, follow with the camera |
-| P / L | Work priorities / wild life and evolution |
+| P / L / K | Work priorities / wild life and evolution / tribes |
 | F2 | Data editor |
 | R / V | Hide roofs and tree tops / see-through roofs |
 | F5 / F9 | Quick save / load |
@@ -123,6 +134,7 @@ The simulation has no dependency on the game engine. It runs headless, which is 
 | `pw_sim` | Particle reactions from data (fire, grass, ash), affected by wind, rain and temperature |
 | `pw_colony` | Colonists, pathfinding, orders, jobs, hauling, stockpiles, construction |
 | `pw_life` | Wild animals: perception, decisions, a learning brain, genes, breeding, evolution and species |
+| `pw_tribe` | Tribes: a chief AI on top of the colony job system, learned culture, research, births, deaths and daughter tribes |
 | `pw_game` | The tick loop, seasons and weather, chunk streaming, player tools, script API, Rust plugin hooks |
 | `pw_save` | Saves only the chunks you changed; content is saved by id so saves survive mod changes |
 | `pw_render` | Chunk textures, sprites, lighting and weather effects, all drawn from particle data (no sprite files) |
@@ -144,7 +156,8 @@ assets/mods/my_mod/
   jobs/*.ron        new orders = a built-in behaviour + target tags
   creatures/*.ron   colonists, or wild animals with a `life` section: diet, enemies,
                     size, sight, lifespan, litter, herding, cold limit, mutation rate
-  powers/*.ron      god powers: paint, ignite, place, spawn, weather, script, flash
+  powers/*.ron      god powers: paint, ignite, place, spawn, weather, tribe, script, flash
+  tribes/*.ron      peoples: food, lifespan, techs and what they unlock, building plans
   climate.ron       seasons, day length, temperatures, weather
   patches/*.json    change other mods' data ("set" / "append")
   scripts/*.rhai    object hooks like fn on_destroyed(ctx, x, y), and world events
@@ -174,8 +187,20 @@ CreatureDef(id: "my_mod:fox", name: "Fox", speed: 4.2,
         flees: ["large_predator"], size: 0.5, lifespan_days: 14.0, litter: (2, 4)))
 ```
 
-Scripts can react to the world. The game calls these by name in any mod: `on_hour(ctx)`, `on_day(ctx, day)`, `on_season(ctx, season)`, `on_weather(ctx, id)`, `on_new_species(ctx, name)`, `on_extinct(ctx, name)`. A script can:
-- read the temperature, season, weather, time, colony position and creature counts;
+A new people is a `tribes/` file. Techs unlock abilities (`harvest`, `chop`, `quarry`, `hunt`, `farm`), and buildings are drawn like patterns, with each character listing the objects built on that tile. Roofs go up after the walls:
+
+```ron
+PlanDef(id: "hut", name: "Hut", tech: "shelter",
+    rows: ["WWWWW",
+           "WbrbW",
+           "WrrrW",
+           "WWDWW"],
+    palette: {'W': ["core:wall_wood"], 'D': ["core:door_wood"],
+              'b': ["core:bedroll", "core:roof_thatch"], 'r': ["core:roof_thatch"]})
+```
+
+Scripts can react to the world. The game calls these by name in any mod: `on_hour(ctx)`, `on_day(ctx, day)`, `on_season(ctx, season)`, `on_weather(ctx, id)`, `on_new_species(ctx, name)`, `on_extinct(ctx, name)`, `on_tribe_founded(ctx, name)`, `on_discovery(ctx, tribe, tech)`, `on_tribe_lost(ctx, name)`. A script can:
+- read the temperature, season, weather, time, colony position and creature counts (`ctx.count("tribes")` counts tribes);
 - read and set any particle;
 - use any god power, spawn creatures and change the weather.
 
@@ -211,6 +236,7 @@ The tests cover:
 - seasons and weather
 - every god power
 - animals eating, breeding, learning, hunting and evolving into new species
+- tribes settling, building huts, learning, hunting, researching and founding daughter tribes, and surviving save/load
 - forests spreading
 - script world events
 - editing every definition as text, live content swaps and hot reload
@@ -218,17 +244,19 @@ The tests cover:
 
 Tools for testing:
 - **Busy-colony benchmark:** `cargo test --release -p pw_game --test game bench -- --ignored --nocapture` times a busy colony.
+- **Tribe history:** `PW_DAYS=30 cargo test --release -p pw_game --test game debug_tribes -- --ignored --nocapture` runs the tribes for 30 days and prints how each one lives and what happened to it.
 - **Scripted screenshot:** `PW_AUTOSHOT=shot.png cargo run --release` plays a short scripted session, saves a screenshot and quits. You can set it up with these variables:
   - `PW_AUTOSHOT_SECS`: when to take the screenshot
   - `PW_AUTOSHOT_DAY` and `PW_AUTOSHOT_HOUR`: when the game starts
   - `PW_AUTOSHOT_WEATHER`: the weather, e.g. `core:snow`
   - `PW_AUTOSHOT_ROOF=1`: a finished roof with a colonist under it
   - `PW_AUTOSHOT_SPEED`: game speed
+  - `PW_AUTOSHOT_TRIBES=N`: let the tribes live N days, then look at one
 - **Frame times:** `PW_FRAMES=1` prints frame timings.
 
 ## Roadmap
 
-Next on the list: colonist needs (food, sleep, warmth), hunting and taming, crafting, farming zones, tribes that settle and build on their own.
+Next on the list: colonist needs (food, sleep, warmth), hunting and taming, crafting, farming zones, trade and diplomacy with tribes.
 
 ## License
 

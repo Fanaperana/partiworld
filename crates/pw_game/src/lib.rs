@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use pw_colony::{Colony, ColonyEvent, nearest_tile};
 use pw_life::{Life, LifeEnv, LifeEvent};
+use pw_tribe::{Founders, TribeEnv, TribeEvent, Tribes};
 use pw_core::*;
 use pw_mods::ScriptHost;
 use pw_objects::{self as objs, ObjectEvent};
@@ -71,6 +72,10 @@ pub struct Game {
     pub env: Env,
     /// Wild animals: their genes, brains and species.
     pub life: Life,
+    /// Villages of people that live on their own.
+    pub tribes: Tribes,
+    /// Where the player's colony landed; tribes keep their distance.
+    pub home: TilePos,
     /// Why the last `build` call skipped tiles, for the UI.
     pub last_build_error: Option<String>,
     /// Recent flashes (x, y, radius, tick) for the renderer: lightning, meteors.
@@ -103,6 +108,8 @@ impl Game {
             mods_dir,
             env: Env::default(),
             life: Life::default(),
+            tribes: Tribes::default(),
+            home: TilePos::new(0, 0),
             last_build_error: None,
             flashes: Vec::new(),
             last_season: String::new(),
@@ -139,6 +146,7 @@ impl Game {
         let (cx, cy) = spawn.center();
         let (_, _, t) = generator.climate(cx, cy);
         self.env.biome_temp = (t - 0.5) * 2.0 * self.content.climate.biome_temp_range;
+        self.home = spawn;
         let sc = spawn.chunk();
         for y in -1..=1 {
             for x in -1..=1 {
@@ -171,6 +179,14 @@ impl Game {
             self.spawn_group(id, spawn.offset(dx, dy), n);
         }
         self.message(format!("Your colonists land. Seed {}.", self.seed));
+        // Neighbours: a couple of tribes already live in the region.
+        let kinds: Vec<String> = self.content.tribes.ids();
+        if !kinds.is_empty() {
+            for i in 0..2 {
+                let k = kinds[i % kinds.len()].clone();
+                self.found_tribe(&k, None, 0);
+            }
+        }
     }
 
     pub fn spawn_tile(&self) -> TilePos {
@@ -250,6 +266,15 @@ impl Game {
         };
         let life_events = self.life.tick(&mut self.world, &content, &mut self.rng, &life_env);
         self.handle_life(life_events);
+        let tribe_env = TribeEnv {
+            tick: self.tick,
+            day_ticks: DAY_TICKS,
+            dark: life_env.dark,
+            walk: life_env.walk,
+            keep_out: vec![(self.home, 14)],
+        };
+        let tribe_events = self.tribes.tick(&mut self.world, &content, &mut self.rng, &tribe_env, &mut self.life);
+        self.handle_tribes(tribe_events);
         if self.tick % DAY_TICKS == DAY_TICKS / 2 {
             self.migrate();
         }
@@ -317,7 +342,10 @@ impl Game {
     fn collapse_roofs(&mut self) {
         let content = self.content.clone();
         // Roofs still under construction are left alone.
-        let building: HashSet<ObjId> = self.colony.blueprints.values().filter_map(|b| b.obj).collect();
+        let mut building: HashSet<ObjId> = self.colony.blueprints.values().filter_map(|b| b.obj).collect();
+        for t in &self.tribes.list {
+            building.extend(t.colony.blueprints.values().filter_map(|b| b.obj));
+        }
         let fallen: Vec<_> = objs::unsupported_roofs(&self.world, &content).into_iter().filter(|r| !building.contains(&r.0)).collect();
         if fallen.is_empty() {
             return;
@@ -328,7 +356,12 @@ impl Game {
                     for &(item, n) in &b.cost {
                         let back = n / 2;
                         if back > 0 {
-                            self.colony.items.add(&self.world, &content, item, back, tile);
+                            // Back to whoever owns the land.
+                            let owner = self.tribes.land_at(tile).map(|t| t.id);
+                            match owner.and_then(|id| self.tribes.list.iter_mut().find(|t| t.id == id)) {
+                                Some(t) => t.colony.items.add(&self.world, &content, item, back, tile),
+                                None => self.colony.items.add(&self.world, &content, item, back, tile),
+                            }
                         }
                     }
                 }
@@ -381,6 +414,15 @@ impl Game {
         for p in &self.colony.pawns {
             let c = p.tile().chunk();
             add_box(&mut needed, ChunkPos::new(c.x - 1, c.y - 1), ChunkPos::new(c.x + 1, c.y + 1));
+        }
+        // Tribes keep their land (and wherever their people roam) alive.
+        for t in self.tribes.living() {
+            let c = t.center.chunk();
+            add_box(&mut needed, ChunkPos::new(c.x - 1, c.y - 1), ChunkPos::new(c.x + 1, c.y + 1));
+            for p in &t.colony.pawns {
+                let c = p.tile().chunk();
+                add_box(&mut needed, ChunkPos::new(c.x - 1, c.y - 1), ChunkPos::new(c.x + 1, c.y + 1));
+            }
         }
         let mut want: Vec<ChunkPos> = needed.iter().copied().filter(|c| !self.world.chunks.contains_key(c)).collect();
         let center = self.view.map(|(a, b)| ((a.x + b.x) / 2, (a.y + b.y) / 2)).unwrap_or((0, 0));
@@ -585,6 +627,11 @@ impl Game {
                 }
                 PowerEffect::Script { function } => self.call_script(&owner, function, (cx, cy)),
                 PowerEffect::Flash => self.flashes.push((cx as f32, cy as f32, rf.max(4.0) * 2.5, self.tick)),
+                PowerEffect::Tribe { tribe, members } => {
+                    if self.found_tribe(tribe, Some(tile_of(cx, cy)), *members).is_none() {
+                        self.message("No room for a tribe there.");
+                    }
+                }
             }
         }
         self.flashes.retain(|f| self.tick.saturating_sub(f.3) < 60);
@@ -629,14 +676,24 @@ impl Game {
         for e in events {
             match e {
                 LifeEvent::Died { def, pos, cause, .. } => {
-                    if cause == pw_life::Death::Burnt {
+                    // Burnt to nothing, or already carried off by hunters.
+                    if cause == pw_life::Death::Burnt || cause == pw_life::Death::Hunted {
                         continue;
                     }
                     if let Some(life) = &content.creatures.by_idx(def).life {
+                        // Remains belong to whoever lives there: a tribe on its land,
+                        // the colony near home; out in the wilds they are lost.
                         let t = tile_of_f(pos.0, pos.1);
+                        let owner = self.tribes.land_at(t).map(|tr| tr.id);
+                        if owner.is_none() && t.chebyshev(self.home) > 45 {
+                            continue;
+                        }
                         for (item, n) in &life.remains {
                             if let Some(i) = content.items.idx(item) {
-                                self.colony.items.add(&self.world, &content, i, *n, t);
+                                match owner.and_then(|id| self.tribes.list.iter_mut().find(|tr| tr.id == id)) {
+                                    Some(tr) => tr.colony.items.add(&self.world, &content, i, *n, t),
+                                    None => self.colony.items.add(&self.world, &content, i, *n, t),
+                                }
                             }
                         }
                     }
@@ -651,6 +708,149 @@ impl Game {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------ tribes
+
+    /// Found a tribe. `at`: right there (god power); None: somewhere around
+    /// the colony. `members` 0 = the tribe's usual number. Returns its id.
+    pub fn found_tribe(&mut self, def_id: &str, at: Option<TilePos>, members: u32) -> Option<u32> {
+        let site = match at {
+            Some(t) => self.tribe_site(t, 0, 4, false)?,
+            None => self.tribe_site(self.home, 40, 70, true)?,
+        };
+        self.prepare_site(site);
+        let content = self.content.clone();
+        let id = self.tribes.found(&mut self.world, &content, &mut self.rng, def_id, site, self.tick, DAY_TICKS, Founders::New(members))?;
+        let name = self.tribes.get(id).map(|t| t.name.clone()).unwrap_or_default();
+        let kind = content.tribes.get(def_id).map(|d| d.name.to_lowercase()).unwrap_or_default();
+        self.message(format!("The {name}, {kind}, have settled nearby."));
+        self.fire_event("on_tribe_founded", vec![name.into()]);
+        Some(id)
+    }
+
+    /// Dry, open land for a village between `min` and `max` tiles from `around`.
+    fn tribe_site(&mut self, around: TilePos, min: i32, max: i32, keep_apart: bool) -> Option<TilePos> {
+        let generator = Generator::new(self.seed, &self.content);
+        let centers: Vec<TilePos> = self.tribes.living().map(|t| t.center).collect();
+        for attempt in 0..60 {
+            let a = self.rng.f32() * std::f32::consts::TAU;
+            let d = if max <= min { min as f32 } else { self.rng.range_f32(min as f32, max as f32) } + (attempt / 20) as f32 * 4.0;
+            let t = around.offset((a.cos() * d).round() as i32, (a.sin() * d).round() as i32);
+            if keep_apart && (t.chebyshev(self.home) < 34 || centers.iter().any(|c| c.chebyshev(t) < 30)) {
+                continue;
+            }
+            let open = (-2..=2).all(|ox| {
+                (-2..=2).all(|oy| {
+                    let tt = t.offset(ox * 2, oy * 2);
+                    if self.world.chunk(tt.chunk()).is_some() {
+                        // Plants can be cleared; rock, water and buildings cannot.
+                        return self.world.walkable(tt)
+                            || self.world.objects_in_tile(tt).iter().any(|&o| self.world.objects.get(o).is_some_and(|i| !i.built));
+                    }
+                    let (x, y) = tt.center();
+                    let ter = generator.terrain_at(&self.content, x as i32, y as i32);
+                    ter.solid == NONE_MAT && self.content.mat_rt(ter.floor).walk_cost > 0.0
+                })
+            });
+            if open {
+                return Some(t);
+            }
+        }
+        None
+    }
+
+    /// Load a village site and clear a little room around its centre.
+    fn prepare_site(&mut self, site: TilePos) {
+        let c = site.chunk();
+        self.load_chunks_now(ChunkPos::new(c.x - 1, c.y - 1), ChunkPos::new(c.x + 1, c.y + 1));
+        let content = self.content.clone();
+        for t in TileRect::from_corners(site.offset(-2, -2), site.offset(4, 2)).iter() {
+            for o in self.world.objects_in_tile(t) {
+                if self.world.objects.get(o).is_some_and(|i| !i.built) {
+                    objs::destroy(&mut self.world, &content, o);
+                }
+            }
+        }
+        self.world.rebuild_tiles(&content);
+    }
+
+    fn handle_tribes(&mut self, events: Vec<TribeEvent>) {
+        let content = self.content.clone();
+        for e in events {
+            match e {
+                TribeEvent::Colony(ColonyEvent::Built { def, center, .. }) => self.run_hook(def, "on_built", center),
+                TribeEvent::Colony(ColonyEvent::Destroyed { def, center }) => self.run_hook(def, "on_destroyed", center),
+                TribeEvent::Colony(ColonyEvent::Harvested { def, center }) => self.run_hook(def, "on_harvested", center),
+                TribeEvent::Colony(ColonyEvent::Message(_)) => {}
+                TribeEvent::Message(m) => self.message(m),
+                TribeEvent::Founded { name } => self.fire_event("on_tribe_founded", vec![name.into()]),
+                TribeEvent::Discovered { tribe, tech } => {
+                    self.message(format!("The {tribe} have discovered {tech}."));
+                    self.fire_event("on_discovery", vec![tribe.into(), tech.into()]);
+                }
+                TribeEvent::Lost { name } => {
+                    self.message(format!("The {name} are no more."));
+                    self.fire_event("on_tribe_lost", vec![name.into()]);
+                }
+                TribeEvent::Split { from, pawns, members, food } => {
+                    let Some(parent) = self.tribes.get(from) else { continue };
+                    let (pc, def_id, pname) = (parent.center, parent.def_id.clone(), parent.name.clone());
+                    let wander = parent.traits[pw_tribe::T_WANDER];
+                    let (lo, hi) = ((30.0 * wander) as i32, (55.0 * wander) as i32);
+                    let n = pawns.len();
+                    match self.tribe_site(pc, lo.max(26), hi.max(34), true) {
+                        Some(site) => {
+                            self.prepare_site(site);
+                            let founders = Founders::Band { parent: from, pawns, members, food };
+                            if let Some(id) = self.tribes.found(&mut self.world, &content, &mut self.rng, &def_id, site, self.tick, DAY_TICKS, founders) {
+                                let name = self.tribes.get(id).map(|t| t.name.clone()).unwrap_or_default();
+                                self.message(format!("{n} people left the {pname} and founded the {name}."));
+                                self.fire_event("on_tribe_founded", vec![name.into()]);
+                            }
+                        }
+                        None => self.tribes.rejoin(from, pawns, members, food, &self.world, &content),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every person in the world: (owner, pawn). Owner 0 is the player's colony, else a tribe id.
+    pub fn all_pawns(&self) -> impl Iterator<Item = (u32, &pw_colony::Pawn)> {
+        self.colony.pawns.iter().map(|p| (0, p)).chain(self.tribes.living().flat_map(|t| t.colony.pawns.iter().map(move |p| (t.id, p))))
+    }
+
+    /// Every item stack on the ground: (owner, stack).
+    pub fn all_items(&self) -> impl Iterator<Item = (u32, &pw_colony::ItemStack)> {
+        self.colony
+            .items
+            .stacks
+            .values()
+            .map(|s| (0, s))
+            .chain(self.tribes.list.iter().flat_map(|t| t.colony.items.stacks.values().map(move |s| (t.id, s))))
+    }
+
+    /// A tribe person near a point.
+    pub fn tribe_pawn_at(&self, p: (f32, f32), reach: f32) -> Option<(&pw_tribe::Tribe, &pw_colony::Pawn)> {
+        self.tribes
+            .living()
+            .flat_map(|t| t.colony.pawns.iter().map(move |pw| (t, pw)))
+            .map(|(t, pw)| (((pw.pos.0 - p.0).powi(2) + (pw.pos.1 - p.1).powi(2)).sqrt(), t, pw))
+            .filter(|x| x.0 <= reach)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|x| (x.1, x.2))
+    }
+
+    /// Lines describing a tribe person.
+    pub fn describe_tribe_pawn(&self, t: &pw_tribe::Tribe, p: &pw_colony::Pawn) -> Vec<String> {
+        let night = self.light().dark > 0.62;
+        let mut out = vec![format!("{} of the {} - {}", p.name, t.name, t.activity(p, night))];
+        if let Some(m) = t.member(p.id) {
+            let age = m.age as f32 / DAY_TICKS as f32;
+            out.push(format!("{age:.0} days old{}", if m.hunger > 0 { ", hungry" } else { "" }));
+        }
+        out
     }
 
     /// Animals that died out locally wander back in from the wilds.
@@ -737,6 +937,12 @@ impl Game {
             out.push(format!("{sp}, {days:.1} days old, generation {}", c.generation));
             out.push(format!("{} - energy {:.0}", c.activity(), c.energy));
         }
+        if let Some((tr, p)) = self.tribe_pawn_at((px as f32, py as f32), 6.0) {
+            out.extend(self.describe_tribe_pawn(tr, p));
+        }
+        if let Some(tr) = self.tribes.land_at(t) {
+            out.push(format!("Land of the {}", tr.name));
+        }
         if let Some(info) = self.world.tile(t) {
             out.push(if info.walkable { format!("Walkable, cost {:.1}", info.cost) } else { "Blocked".into() });
         }
@@ -777,9 +983,10 @@ impl Game {
         for c in &self.life.creatures {
             *counts.entry(self.content.creatures.by_idx(c.def).id.clone()).or_insert(0) += 1;
         }
-        for p in &self.colony.pawns {
+        for (_, p) in self.all_pawns() {
             *counts.entry(self.content.creatures.by_idx(p.creature).id.clone()).or_insert(0) += 1;
         }
+        counts.insert("tribes".into(), self.tribes.alive() as i64);
         let colony = self.colony.pawns.first().map(|p| (p.pos.0 as i32, p.pos.1 as i32)).unwrap_or((0, 0));
         script::WorldInfo {
             temp: self.env.temp,

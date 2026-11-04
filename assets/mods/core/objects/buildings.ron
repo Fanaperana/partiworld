@@ -47,7 +47,8 @@
         tags: ["door", "flammable"],
         anchor: Tile,
         shape: Pattern(
-            palette: {'P': "core:plank_dark", 'D': "core:door_wood"},
+            // The frame does not block: a door is something you walk through.
+            palette: {'P': "core:door_frame", 'D': "core:door_wood"},
             layers: [PatternLayer(layer: Solid, rows: [
                 "PPPPPPPP",
                 "PDDDDDDP",
@@ -103,7 +104,7 @@
     ObjectDef(
         id: "core:bed",
         name: "Bed",
-        tags: ["furniture", "flammable"],
+        tags: ["furniture", "bed", "flammable"],
         anchor: Tile,
         shape: Pattern(
             palette: {'P': "core:plank_dark", 'c': "core:bed_cloth", 'o': "core:bed_pillow"},

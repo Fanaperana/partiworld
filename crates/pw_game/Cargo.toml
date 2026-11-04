@@ -13,6 +13,7 @@ pw_worldgen.workspace = true
 pw_sim.workspace = true
 pw_colony.workspace = true
 pw_life.workspace = true
+pw_tribe.workspace = true
 serde.workspace = true
 rhai.workspace = true
 [dev-dependencies]

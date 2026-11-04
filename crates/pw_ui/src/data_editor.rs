@@ -19,16 +19,18 @@ pub enum Kind {
     Jobs,
     Creatures,
     Powers,
+    Tribes,
     Climate,
     Worldgen,
 }
 
-const KINDS: [Kind; 10] = [
+const KINDS: [Kind; 11] = [
     Kind::Materials,
     Kind::Objects,
     Kind::Reactions,
     Kind::Creatures,
     Kind::Powers,
+    Kind::Tribes,
     Kind::Climate,
     Kind::Biomes,
     Kind::Items,
@@ -47,6 +49,7 @@ impl Kind {
             Kind::Jobs => "Jobs",
             Kind::Creatures => "Creatures",
             Kind::Powers => "Powers",
+            Kind::Tribes => "Tribes",
             Kind::Climate => "Climate",
             Kind::Worldgen => "World gen",
         }
@@ -62,6 +65,7 @@ impl Kind {
             Kind::Jobs => Some("jobs"),
             Kind::Creatures => Some("creatures"),
             Kind::Powers => Some("powers"),
+            Kind::Tribes => Some("tribes"),
             Kind::Climate | Kind::Worldgen => None,
         }
     }
@@ -110,6 +114,7 @@ impl DataEditor {
             Kind::Jobs => ids(&c.jobs),
             Kind::Creatures => ids(&c.creatures),
             Kind::Powers => ids(&c.powers),
+            Kind::Tribes => ids(&c.tribes),
             Kind::Climate => vec!["climate".into()],
             Kind::Worldgen => vec!["worldgen".into()],
         }
@@ -125,6 +130,7 @@ impl DataEditor {
             Kind::Jobs => text_of(&c.jobs, id),
             Kind::Creatures => text_of(&c.creatures, id),
             Kind::Powers => text_of(&c.powers, id),
+            Kind::Tribes => text_of(&c.tribes, id),
             Kind::Climate => pw_mods::to_ron(&c.climate).unwrap_or_default(),
             Kind::Worldgen => pw_mods::to_ron(&c.worldgen).unwrap_or_default(),
         };
@@ -144,6 +150,7 @@ impl DataEditor {
             Kind::Jobs => put(&mut c.jobs, &self.text)?,
             Kind::Creatures => put(&mut c.creatures, &self.text)?,
             Kind::Powers => put(&mut c.powers, &self.text)?,
+            Kind::Tribes => put(&mut c.tribes, &self.text)?,
             Kind::Climate => {
                 c.climate = pw_mods::parse_ron(&self.text)?;
                 "climate".into()

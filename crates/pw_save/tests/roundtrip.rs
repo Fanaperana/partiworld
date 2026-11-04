@@ -42,3 +42,27 @@ fn save_load_roundtrip() {
         g2.step();
     }
 }
+
+#[test]
+fn tribes_survive_save_and_load() {
+    let mods = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/mods");
+    let (content, scripts, _) = pw_mods::load_all(&mods);
+    let mut g = Game::new(Arc::new(content), scripts, Arc::new(Extensions::default()), 7, mods.clone());
+    for _ in 0..600 {
+        g.step();
+    }
+    assert!(g.tribes.alive() > 0);
+    let path = std::env::temp_dir().join("partiworld_test").join("tribes.pws");
+    pw_save::save(&g, &path).unwrap();
+    let names: Vec<String> = g.tribes.list.iter().map(|t| t.name.clone()).collect();
+    let people: usize = g.tribes.list.iter().map(|t| t.colony.pawns.len()).sum();
+    let (c2, s2, _) = pw_mods::load_all(&mods);
+    let mut h = Game::new(Arc::new(c2), s2, Arc::new(Extensions::default()), 99, mods);
+    pw_save::load(&mut h, &path).unwrap();
+    assert_eq!(h.tribes.list.iter().map(|t| t.name.clone()).collect::<Vec<_>>(), names);
+    assert_eq!(h.tribes.list.iter().map(|t| t.colony.pawns.len()).sum::<usize>(), people);
+    assert_eq!(h.home, g.home);
+    for _ in 0..300 {
+        h.step();
+    }
+}

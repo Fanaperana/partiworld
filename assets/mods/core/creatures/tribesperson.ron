@@ -1,0 +1,25 @@
+// People of the tribes. `$band` is painted in their tribe's colour.
+CreatureDef(
+    id: "core:tribesperson",
+    name: "Tribesperson",
+    sprite: SpriteDef(
+        palette: {'h': "$hair", 'b': "$band", 's': "$skin", 'T': "$tunic", 'p': "#2a241e"},
+        rows: [
+            "..hhhh..",
+            ".bbbbbb.",
+            ".hhsshh.",
+            "..ssss..",
+            ".TTTTTT.",
+            "sTTbbTTs",
+            "sTTTTTTs",
+            ".pp..pp.",
+        ],
+    ),
+    speed: 3.0,
+    slots: {
+        "hair": ["#1c140e", "#3a2616", "#5a3a1e", "#20201c", "#7a4a26"],
+        "skin": ["#d9a47a", "#b07850", "#8a5a3a", "#6e4a30", "#c48e64"],
+        "tunic": ["#c49a64", "#a8b070", "#d0b080", "#9a7a52", "#b8865a", "#e0d0a8"],
+        "band": ["#c0392b"],
+    },
+)

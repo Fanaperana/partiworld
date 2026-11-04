@@ -726,4 +726,175 @@ pub enum PowerEffect {
     Script { function: String },
     /// A bright flash (lightning, explosions); purely visual.
     Flash,
+    /// Found a new tribe of this kind here.
+    Tribe {
+        tribe: String,
+        #[serde(default)]
+        members: u32,
+    },
+}
+
+/// A kind of people that settles, gathers, builds, learns and spreads on
+/// its own. Everything a tribe can know and build is data: techs unlock
+/// abilities and building plans, and plans are drawn as character grids
+/// of object ids, like the object editor's patterns. Mods add new peoples
+/// by adding files to `tribes/`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TribeDef {
+    pub id: String,
+    pub name: String,
+    /// Creature used for its people (sprite, speed). A `$band` slot is
+    /// painted in the tribe's own colour.
+    pub creature: String,
+    /// Syllables that tribe and person names are made of.
+    #[serde(default)]
+    pub syllables: Vec<String>,
+    /// People in a new tribe (min, max).
+    #[serde(default = "default_tribe_members")]
+    pub members: (u32, u32),
+    /// Food items and how many meals one unit is.
+    pub food: Vec<(String, f32)>,
+    #[serde(default = "one")]
+    pub meals_per_day: f32,
+    /// Lifespan in in-game days (min, max).
+    #[serde(default = "default_tribe_lifespan")]
+    pub lifespan_days: (f32, f32),
+    /// A band leaves to found a new tribe at this many people.
+    #[serde(default = "default_split_at")]
+    pub split_at: u32,
+    #[serde(default = "default_tribe_max")]
+    pub max_members: u32,
+    /// How far from its centre (tiles) a tribe works.
+    #[serde(default = "default_tribe_radius")]
+    pub radius: i32,
+    /// Object placed at the village centre when it is founded.
+    #[serde(default)]
+    pub totem: Option<String>,
+    #[serde(default)]
+    pub start_items: Vec<(String, u32)>,
+    /// Techs every new tribe of this kind knows.
+    #[serde(default)]
+    pub start_techs: Vec<String>,
+    #[serde(default)]
+    pub techs: Vec<TechDef>,
+    #[serde(default)]
+    pub plans: Vec<PlanDef>,
+    /// Creature tags it hunts (needs a tech that unlocks "hunt").
+    #[serde(default = "default_prey")]
+    pub prey: Vec<String>,
+    /// What it plants when farming (needs a tech that unlocks "farm").
+    #[serde(default)]
+    pub crop: Option<String>,
+    /// Job ids used for each kind of work.
+    #[serde(default)]
+    pub jobs: TribeJobs,
+    /// Items counted as wood and stone.
+    #[serde(default = "default_wood")]
+    pub wood: String,
+    #[serde(default = "default_stone")]
+    pub stone: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TribeJobs {
+    #[serde(default = "job_harvest")]
+    pub harvest: String,
+    #[serde(default = "job_chop")]
+    pub chop: String,
+    #[serde(default = "job_quarry")]
+    pub quarry: String,
+    #[serde(default = "job_plant")]
+    pub plant: String,
+}
+
+impl Default for TribeJobs {
+    fn default() -> Self {
+        Self { harvest: job_harvest(), chop: job_chop(), quarry: job_quarry(), plant: job_plant() }
+    }
+}
+
+fn job_harvest() -> String {
+    "core:harvest".into()
+}
+fn job_chop() -> String {
+    "core:chop".into()
+}
+fn job_quarry() -> String {
+    "core:quarry".into()
+}
+fn job_plant() -> String {
+    "core:plant".into()
+}
+fn default_wood() -> String {
+    "core:wood".into()
+}
+fn default_stone() -> String {
+    "core:stone".into()
+}
+fn default_prey() -> Vec<String> {
+    vec!["prey".into()]
+}
+fn default_tribe_members() -> (u32, u32) {
+    (4, 5)
+}
+fn default_tribe_lifespan() -> (f32, f32) {
+    (60.0, 90.0)
+}
+fn default_split_at() -> u32 {
+    10
+}
+fn default_tribe_max() -> u32 {
+    14
+}
+fn default_tribe_radius() -> i32 {
+    22
+}
+
+/// Something a tribe can discover. `unlocks` are abilities: `harvest`,
+/// `chop`, `quarry`, `hunt`, `farm`. Plans name the tech they need.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TechDef {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// Techs that must be known first.
+    #[serde(default)]
+    pub after: Vec<String>,
+    /// Research needed. A tribe makes about 1.5 points per person per day.
+    #[serde(default = "default_tech_points")]
+    pub points: f32,
+    #[serde(default)]
+    pub unlocks: Vec<String>,
+}
+
+fn default_tech_points() -> f32 {
+    30.0
+}
+
+/// A building a tribe knows how to put up. Each character in `rows` is a
+/// tile; the palette lists the objects built on that tile (walls, beds,
+/// roofs...). Roofs and anything else that needs support go up last.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlanDef {
+    pub id: String,
+    pub name: String,
+    /// Tech needed to build it.
+    #[serde(default)]
+    pub tech: Option<String>,
+    /// `home` (adds beds), `fire` (one per village), or anything else.
+    #[serde(default = "default_role")]
+    pub role: String,
+    pub rows: Vec<String>,
+    pub palette: BTreeMap<char, Vec<String>>,
+}
+
+fn default_role() -> String {
+    "home".into()
+}
+
+impl Def for TribeDef {
+    fn def_id(&self) -> &str {
+        &self.id
+    }
 }

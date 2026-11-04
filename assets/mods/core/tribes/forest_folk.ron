@@ -1,0 +1,75 @@
+// A people that settles, gathers, builds and spreads on its own.
+// Techs unlock abilities (harvest, chop, quarry, hunt, farm) and plans.
+// Plans are drawn like patterns: each character is a tile, the palette
+// lists what is built there. Roofs go up after the walls stand.
+TribeDef(
+    id: "core:forest_folk",
+    name: "Forest folk",
+    creature: "core:tribesperson",
+    syllables: ["ka", "ro", "mi", "ta", "lu", "ne", "so", "ar", "en", "ki", "va", "do", "ul", "she", "tor", "an", "il", "bo"],
+    members: (4, 5),
+    food: [("core:berries", 1.0), ("core:meat", 2.5)],
+    meals_per_day: 1.0,
+    lifespan_days: (60.0, 90.0),
+    split_at: 10,
+    max_members: 14,
+    radius: 22,
+    totem: "core:totem",
+    start_items: [("core:berries", 24), ("core:wood", 20)],
+    start_techs: ["foraging", "shelter"],
+    prey: ["prey"],
+    crop: "core:berry_sprout",
+    techs: [
+        TechDef(id: "foraging", name: "Foraging", description: "Picking berries and cutting wood.", points: 0.0, unlocks: ["harvest", "chop"]),
+        TechDef(id: "shelter", name: "Shelter", description: "Huts of wood and thatch.", points: 0.0),
+        TechDef(id: "hunting", name: "Hunting", description: "Chasing down game for meat and hides.", points: 20.0, unlocks: ["hunt"]),
+        TechDef(id: "stonework", name: "Stonework", description: "Breaking rocks for stone.", after: ["shelter"], points: 35.0, unlocks: ["quarry"]),
+        TechDef(id: "farming", name: "Farming", description: "Planting berry fields.", after: ["foraging"], points: 45.0, unlocks: ["farm"]),
+        TechDef(id: "carpentry", name: "Carpentry", description: "Longhouses with wooden floors.", after: ["shelter"], points: 50.0),
+        TechDef(id: "masonry", name: "Masonry", description: "Houses of stone that do not burn.", after: ["stonework"], points: 70.0),
+    ],
+    plans: [
+        PlanDef(id: "campfire", name: "Campfire", tech: "shelter", role: "fire", rows: ["F"], palette: {'F': ["core:campfire"]}),
+        PlanDef(
+            id: "hut", name: "Hut", tech: "shelter",
+            rows: [
+                "WWWWW",
+                "WbrbW",
+                "WrrrW",
+                "WWDWW",
+            ],
+            palette: {
+                'W': ["core:wall_wood"], 'D': ["core:door_wood"],
+                'b': ["core:bedroll", "core:roof_thatch"], 'r': ["core:roof_thatch"],
+            },
+        ),
+        PlanDef(
+            id: "longhouse", name: "Longhouse", tech: "carpentry",
+            rows: [
+                "WWWWWWW",
+                "WbfbfbW",
+                "WfffffW",
+                "WbfffbW",
+                "WWWDWWW",
+            ],
+            palette: {
+                'W': ["core:wall_wood"], 'D': ["core:door_wood"],
+                'b': ["core:bedroll", "core:roof_thatch"], 'f': ["core:floor_wood", "core:roof_thatch"],
+            },
+        ),
+        PlanDef(
+            id: "stone_house", name: "Stone house", tech: "masonry",
+            rows: [
+                "SSSSS",
+                "SbrbS",
+                "SrrrS",
+                "SbrbS",
+                "SSDSS",
+            ],
+            palette: {
+                'S': ["core:wall_stone"], 'D': ["core:door_wood"],
+                'b': ["core:bedroll", "core:roof_thatch"], 'r': ["core:roof_thatch"],
+            },
+        ),
+    ],
+)

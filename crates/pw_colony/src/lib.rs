@@ -303,6 +303,30 @@ impl Colony {
         self.items.rebuild_index();
     }
 
+    /// Take a pawn out of the colony (death, leaving): its job is let go and
+    /// anything it carried is dropped where it stands.
+    pub fn remove_pawn(&mut self, world: &mut World, content: &Content, rng: &mut Rng, id: u32) -> Option<Pawn> {
+        let i = self.pawns.iter().position(|p| p.id == id)?;
+        let mut pawn = self.pawns.remove(i);
+        let mut events = Vec::new();
+        let mut ctx = Ctx { world, content, rng, events: &mut events, walk: 1.0 };
+        self.end_job(&mut pawn, &mut ctx, false);
+        if let Some((item, n)) = pawn.carrying.take() {
+            self.items.add(world, content, item, n, pawn.tile());
+        }
+        Some(pawn)
+    }
+
+    /// Add an existing pawn (moving between colonies). It gets a new id here.
+    pub fn adopt_pawn(&mut self, mut pawn: Pawn) -> u32 {
+        self.next_pawn += 1;
+        pawn.id = self.next_pawn;
+        pawn.job = None;
+        pawn.path.clear();
+        self.pawns.push(pawn);
+        self.next_pawn
+    }
+
     pub fn spawn_pawn(&mut self, content: &Content, creature: usize, tile: TilePos, rng: &mut Rng) -> u32 {
         let def = content.creatures.by_idx(creature);
         self.next_pawn += 1;

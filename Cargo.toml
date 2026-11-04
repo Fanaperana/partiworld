@@ -32,6 +32,7 @@ pw_worldgen = { path = "crates/pw_worldgen" }
 pw_sim = { path = "crates/pw_sim" }
 pw_colony = { path = "crates/pw_colony" }
 pw_life = { path = "crates/pw_life" }
+pw_tribe = { path = "crates/pw_tribe" }
 pw_game = { path = "crates/pw_game" }
 pw_save = { path = "crates/pw_save" }
 pw_render = { path = "crates/pw_render" }

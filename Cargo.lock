@@ -4907,6 +4907,7 @@ dependencies = [
  "pw_mods",
  "pw_objects",
  "pw_sim",
+ "pw_tribe",
  "pw_world",
  "pw_worldgen",
  "rhai",
@@ -4954,6 +4955,7 @@ dependencies = [
  "pw_core",
  "pw_game",
  "pw_life",
+ "pw_tribe",
  "pw_world",
 ]
 
@@ -4968,6 +4970,7 @@ dependencies = [
  "pw_game",
  "pw_life",
  "pw_mods",
+ "pw_tribe",
  "pw_world",
  "serde",
 ]
@@ -4982,6 +4985,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pw_tribe"
+version = "0.1.0"
+dependencies = [
+ "pw_colony",
+ "pw_core",
+ "pw_life",
+ "pw_objects",
+ "pw_world",
+ "serde",
+]
+
+[[package]]
 name = "pw_ui"
 version = "0.1.0"
 dependencies = [
@@ -4993,6 +5008,7 @@ dependencies = [
  "pw_mods",
  "pw_render",
  "pw_save",
+ "pw_tribe",
  "serde",
 ]
 
