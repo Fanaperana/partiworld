@@ -1,0 +1,25 @@
+CreatureDef(
+    id: "core:colonist",
+    name: "Colonist",
+    // Seen from above: hair, face, shoulders, arms. One tile (8x8 particles).
+    sprite: SpriteDef(
+        palette: {'h': "$hair", 's': "$skin", 'S': "$shirt", 'p': "#2d2a33"},
+        rows: [
+            "..hhhh..",
+            ".hhhhhh.",
+            ".hhsshh.",
+            "..ssss..",
+            ".SSSSSS.",
+            "sSSSSSSs",
+            "sSSSSSSs",
+            ".pp..pp.",
+        ],
+    ),
+    speed: 3.2,
+    names: ["Ada", "Bram", "Cleo", "Dov", "Edda", "Finn", "Greta", "Hiro", "Ines", "Joss", "Kai", "Lena", "Milo", "Nia", "Otto", "Pia", "Rune", "Suri", "Tove", "Ugo", "Vera", "Wim", "Yara", "Zed"],
+    slots: {
+        "hair": ["#2b1d14", "#5a3a1e", "#b07a3a", "#e0c070", "#1c1c1c", "#8a3b22", "#cfcfcf"],
+        "skin": ["#f1c9a5", "#d9a47a", "#b07850", "#8a5a3a", "#5e3d27"],
+        "shirt": ["#3f6fb5", "#b53f3f", "#3fa060", "#c09030", "#7a4fb0", "#d06a2a", "#408a8a"],
+    },
+)

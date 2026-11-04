@@ -1,0 +1,14 @@
+[
+    MaterialDef(id: "core:plank", name: "Wooden planks", color: "#a0723f", variance: 0.08, blocks: true, tags: ["flammable", "built"]),
+    MaterialDef(id: "core:plank_dark", name: "Wooden planks", color: "#7d5530", variance: 0.08, blocks: true, tags: ["flammable", "built"]),
+    MaterialDef(id: "core:stone_brick", name: "Stone bricks", color: "#9d9890", variance: 0.06, blocks: true, tags: ["built"]),
+    MaterialDef(id: "core:mortar", name: "Mortar", color: "#6c6862", variance: 0.05, blocks: true, tags: ["built"]),
+    MaterialDef(id: "core:wood_floor", name: "Wooden floor", color: "#8f6538", variance: 0.06, walk_cost: 0.8, tags: ["flammable", "built"]),
+    MaterialDef(id: "core:wood_floor_dark", name: "Wooden floor", color: "#73502c", variance: 0.06, walk_cost: 0.8, tags: ["flammable", "built"]),
+    MaterialDef(id: "core:door_wood", name: "Wooden door", color: "#b0844a", variance: 0.05, tags: ["flammable", "built"]),
+    MaterialDef(id: "core:thatch", name: "Thatch roof", color: "#c9a85ccc", variance: 0.15, tags: ["flammable", "roof"]),
+    MaterialDef(id: "core:bed_cloth", name: "Bed linen", color: "#c8c0b0", variance: 0.04, tags: ["flammable", "built"]),
+    MaterialDef(id: "core:bed_pillow", name: "Pillow", color: "#eee8dc", variance: 0.03, tags: ["flammable", "built"]),
+    MaterialDef(id: "core:ember", name: "Embers", color: "#e8762a", variance: 0.5, tags: ["glow"]),
+    MaterialDef(id: "core:fire_ring", name: "Stone ring", color: "#6f6a66", variance: 0.1, tags: ["built"]),
+]

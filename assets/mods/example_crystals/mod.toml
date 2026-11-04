@@ -1,0 +1,5 @@
+id = "example_crystals"
+name = "Crystal Groves (example mod)"
+version = "0.1.0"
+description = "Shows modding without Rust: a new material, item and tree, a patch that adds it to forests, and a script hook."
+depends = ["core"]

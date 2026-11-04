@@ -1,0 +1,7 @@
+[
+    ItemDef(id: "core:wood", name: "Wood", color: "#8a5a30", tags: ["material"]),
+    ItemDef(id: "core:stone", name: "Stone chunks", color: "#8f8a85", tags: ["material"]),
+    ItemDef(id: "core:iron", name: "Iron ore", color: "#a06f58", tags: ["material"]),
+    ItemDef(id: "core:gold", name: "Gold", color: "#e0b83a", tags: ["material", "valuable"]),
+    ItemDef(id: "core:berries", name: "Berries", color: "#b82a46", tags: ["food"]),
+]

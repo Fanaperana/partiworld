@@ -1,0 +1,91 @@
+[
+    ObjectDef(
+        id: "core:oak_tree",
+        name: "Oak tree",
+        tags: ["tree", "flammable"],
+        shape: Procedural([
+            Blob(layer: Overlay, material: "core:oak_leaves", radius: (9.0, 13.0), roughness: 0.6, density: 0.97),
+            Blob(layer: Overlay, material: "core:oak_leaves_light", radius: (4.0, 7.0), offset: (-2.0, 2.0), roughness: 0.8, density: 0.6),
+            Circle(layer: Solid, material: "core:oak_wood", radius: (2.4, 3.3)),
+        ]),
+        break_fraction: 0.35,
+        drops: [DropDef(item: "core:wood", min: 8, max: 14)],
+        hooks: {"on_destroyed": "tree_fall"},
+    ),
+    ObjectDef(
+        id: "core:pine_tree",
+        name: "Pine tree",
+        tags: ["tree", "flammable"],
+        shape: Procedural([
+            Circle(layer: Overlay, material: "core:pine_needles", radius: (7.0, 10.0), density: 0.95),
+            Blob(layer: Overlay, material: "core:pine_needles_dark", radius: (3.0, 5.0), roughness: 0.4),
+            Circle(layer: Solid, material: "core:pine_wood", radius: (2.0, 2.8)),
+        ]),
+        break_fraction: 0.35,
+        drops: [DropDef(item: "core:wood", min: 6, max: 10)],
+        hooks: {"on_destroyed": "tree_fall"},
+    ),
+    ObjectDef(
+        id: "core:berry_bush",
+        name: "Berry bush",
+        tags: ["bush", "harvestable", "flammable"],
+        shape: Procedural([
+            Blob(layer: Solid, material: "core:bush_leaves", radius: (4.0, 5.5), roughness: 0.5, density: 0.95),
+            Scatter(layer: Solid, material: "core:berries", radius: 4.5, count: (10, 16)),
+        ]),
+        break_fraction: 0.5,
+        drops: [DropDef(item: "core:wood", min: 0, max: 1)],
+        regrow: RegrowDef(materials: ["core:berries"], interval: 1800, chance: 0.35),
+    ),
+    ObjectDef(
+        id: "core:shrub",
+        name: "Shrub",
+        tags: ["bush", "flammable"],
+        shape: Procedural([
+            Blob(layer: Solid, material: "core:bush_leaves_dark", radius: (2.5, 4.5), roughness: 0.7, density: 0.9),
+        ]),
+        break_fraction: 0.5,
+        drops: [DropDef(item: "core:wood", min: 0, max: 2)],
+    ),
+    ObjectDef(
+        id: "core:boulder",
+        name: "Boulder",
+        tags: ["rock"],
+        shape: Procedural([
+            Blob(layer: Solid, material: "core:stone", radius: (4.0, 7.0), roughness: 0.4),
+        ]),
+        break_fraction: 0.6,
+        drops: [DropDef(item: "core:stone", min: 4, max: 8)],
+    ),
+    ObjectDef(
+        id: "core:flowers",
+        name: "Wildflowers",
+        tags: ["flower"],
+        shape: Procedural([
+            Scatter(layer: Floor, material: "core:flower_red", radius: 5.0, count: (3, 8)),
+            Scatter(layer: Floor, material: "core:flower_yellow", radius: 6.0, count: (3, 8)),
+            Scatter(layer: Floor, material: "core:flower_blue", radius: 4.0, count: (0, 5)),
+        ]),
+    ),
+    ObjectDef(
+        id: "core:oak_sapling",
+        name: "Oak sapling",
+        tags: ["plant", "tree", "flammable"],
+        shape: Procedural([
+            Circle(layer: Solid, material: "core:sapling_wood", radius: (1.0, 1.4)),
+            Blob(layer: Overlay, material: "core:oak_leaves_light", radius: (3.0, 4.0), roughness: 0.6, density: 0.8),
+        ]),
+        break_fraction: 0.5,
+        growth: GrowthDef(next: "core:oak_tree", ticks: 3600),
+    ),
+    ObjectDef(
+        id: "core:berry_sprout",
+        name: "Berry sprout",
+        tags: ["plant", "bush", "flammable"],
+        shape: Procedural([
+            Blob(layer: Solid, material: "core:bush_leaves", radius: (1.5, 2.5), roughness: 0.5, density: 0.8),
+        ]),
+        break_fraction: 0.5,
+        growth: GrowthDef(next: "core:berry_bush", ticks: 2400),
+    ),
+]

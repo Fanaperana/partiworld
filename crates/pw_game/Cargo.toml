@@ -1,0 +1,16 @@
+[package]
+name = "pw_game"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pw_core.workspace = true
+pw_mods.workspace = true
+pw_world.workspace = true
+pw_objects.workspace = true
+pw_worldgen.workspace = true
+pw_sim.workspace = true
+pw_colony.workspace = true
+serde.workspace = true
+rhai.workspace = true
+[dev-dependencies]

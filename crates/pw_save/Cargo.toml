@@ -1,0 +1,16 @@
+[package]
+name = "pw_save"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pw_core.workspace = true
+pw_world.workspace = true
+pw_colony.workspace = true
+pw_game.workspace = true
+serde.workspace = true
+bincode.workspace = true
+lz4_flex.workspace = true
+
+[dev-dependencies]
+pw_mods.workspace = true

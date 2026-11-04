@@ -1,0 +1,10 @@
+[package]
+name = "pw_worldgen"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pw_core.workspace = true
+pw_world.workspace = true
+pw_objects.workspace = true
+fastnoise-lite.workspace = true

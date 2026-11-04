@@ -1,0 +1,10 @@
+// Slow "random tick" reactions: a few random cells per chunk are checked each tick.
+[
+    ReactionDef(id: "core:grass_spreads", layer: Floor, input: "core:dirt", chance: 0.7, mode: Random,
+        neighbor: NeighborDef(layer: Floor, matches: "core:grass"),
+        effects: [EffectDef(target: Me, set: "core:grass")]),
+    ReactionDef(id: "core:ash_settles", layer: Floor, input: "core:ash", chance: 0.4, mode: Random,
+        effects: [EffectDef(target: Me, set: "core:dirt")]),
+    ReactionDef(id: "core:litter_rots", layer: Floor, input: "core:leaf_litter", chance: 0.02, mode: Random,
+        effects: [EffectDef(target: Me, set: "core:dirt")]),
+]

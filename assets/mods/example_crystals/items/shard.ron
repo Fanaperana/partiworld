@@ -1,0 +1,15 @@
+ItemDef(
+    id: "example_crystals:shard",
+    name: "Crystal shard",
+    color: "#9fe4f0",
+    tags: ["valuable"],
+    sprite: SpriteDef(
+        palette: {'a': "#dff8ff", 'b': "#7fd8e8", 'c': "#4aa0c0"},
+        rows: [
+            ".a..",
+            "aba.",
+            "bbcb",
+            ".cc.",
+        ],
+    ),
+)

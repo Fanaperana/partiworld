@@ -1,0 +1,5 @@
+[
+    MaterialDef(id: "example_crystals:crystal", name: "Crystal trunk", color: "#7fd8e8", variance: 0.3, blocks: true, tags: ["glow"]),
+    MaterialDef(id: "example_crystals:crystal_leaf", name: "Crystal leaves", color: "#b28be8d8", variance: 0.35, tags: ["leaves"]),
+    MaterialDef(id: "example_crystals:crystal_spark", name: "Crystal sparks", color: "#f2e6ff", variance: 0.2, tags: ["glow"]),
+]

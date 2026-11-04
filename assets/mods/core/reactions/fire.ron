@@ -1,0 +1,33 @@
+// Fire lives in any layer. It spreads to flammable neighbours (and to the
+// other layers of its own cell), then burns out. Floors burn to ash.
+[
+    ReactionDef(id: "core:fire_spread_solid", layer: Solid, input: "core:fire", chance: 0.22,
+        neighbor: NeighborDef(layer: Solid, matches: "tag:flammable"),
+        effects: [EffectDef(target: Other, set: "core:fire")]),
+    ReactionDef(id: "core:fire_solid_to_canopy", layer: Solid, input: "core:fire", chance: 0.10,
+        neighbor: NeighborDef(layer: Overlay, matches: "tag:flammable", same_cell: true),
+        effects: [EffectDef(target: Other, set: "core:fire")]),
+    ReactionDef(id: "core:fire_solid_to_floor", layer: Solid, input: "core:fire", chance: 0.05,
+        neighbor: NeighborDef(layer: Floor, matches: "tag:flammable", same_cell: true),
+        effects: [EffectDef(target: Other, set: "core:fire")]),
+    ReactionDef(id: "core:fire_burnout_solid", layer: Solid, input: "core:fire", chance: 0.03,
+        effects: [EffectDef(target: Me, set: "none")]),
+
+    ReactionDef(id: "core:fire_spread_canopy", layer: Overlay, input: "core:fire", chance: 0.25,
+        neighbor: NeighborDef(layer: Overlay, matches: "tag:flammable"),
+        effects: [EffectDef(target: Other, set: "core:fire")]),
+    ReactionDef(id: "core:fire_canopy_to_solid", layer: Overlay, input: "core:fire", chance: 0.04,
+        neighbor: NeighborDef(layer: Solid, matches: "tag:flammable", same_cell: true),
+        effects: [EffectDef(target: Other, set: "core:fire")]),
+    ReactionDef(id: "core:fire_burnout_canopy", layer: Overlay, input: "core:fire", chance: 0.04,
+        effects: [EffectDef(target: Me, set: "none")]),
+
+    ReactionDef(id: "core:fire_spread_floor", layer: Floor, input: "core:fire", chance: 0.08,
+        neighbor: NeighborDef(layer: Floor, matches: "tag:flammable"),
+        effects: [EffectDef(target: Other, set: "core:fire")]),
+    ReactionDef(id: "core:fire_floor_to_solid", layer: Floor, input: "core:fire", chance: 0.05,
+        neighbor: NeighborDef(layer: Solid, matches: "tag:flammable", same_cell: true),
+        effects: [EffectDef(target: Other, set: "core:fire")]),
+    ReactionDef(id: "core:fire_burnout_floor", layer: Floor, input: "core:fire", chance: 0.06,
+        effects: [EffectDef(target: Me, set: "core:ash")]),
+]

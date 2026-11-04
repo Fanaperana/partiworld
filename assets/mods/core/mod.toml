@@ -1,0 +1,5 @@
+id = "core"
+name = "Partiworld Core"
+version = "0.1.0"
+description = "Base game content. Everything here is data, the same as any other mod."
+depends = []

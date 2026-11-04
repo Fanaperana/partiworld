@@ -1,0 +1,15 @@
+[
+    MaterialDef(id: "core:oak_wood", name: "Oak wood", color: "#5b3b22", variance: 0.2, blocks: true, tags: ["flammable", "wood"]),
+    MaterialDef(id: "core:oak_leaves", name: "Oak leaves", color: "#3f7a2c", variance: 0.25, tags: ["flammable", "leaves"]),
+    MaterialDef(id: "core:oak_leaves_light", name: "Oak leaves", color: "#62a03c", variance: 0.2, tags: ["flammable", "leaves"]),
+    MaterialDef(id: "core:pine_wood", name: "Pine wood", color: "#4a3020", variance: 0.2, blocks: true, tags: ["flammable", "wood"]),
+    MaterialDef(id: "core:pine_needles", name: "Pine needles", color: "#2a5a33", variance: 0.2, tags: ["flammable", "leaves"]),
+    MaterialDef(id: "core:pine_needles_dark", name: "Pine needles", color: "#1f4628", variance: 0.2, tags: ["flammable", "leaves"]),
+    MaterialDef(id: "core:sapling_wood", name: "Sapling", color: "#6d4a2a", variance: 0.1, tags: ["flammable", "wood"]),
+    MaterialDef(id: "core:bush_leaves", name: "Bush", color: "#3d6b2a", variance: 0.25, tags: ["flammable", "leaves"]),
+    MaterialDef(id: "core:bush_leaves_dark", name: "Shrub", color: "#2e5524", variance: 0.25, tags: ["flammable", "leaves"]),
+    MaterialDef(
+        id: "core:berries", name: "Berries", color: "#b0243f", variance: 0.2, tags: ["flammable", "food"],
+        yields: YieldDef(item: "core:berries", per: 2),
+    ),
+]

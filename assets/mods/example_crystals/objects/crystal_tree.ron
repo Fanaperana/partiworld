@@ -1,0 +1,14 @@
+ObjectDef(
+    id: "example_crystals:crystal_tree",
+    name: "Crystal tree",
+    // Tagged "tree", so the core "Chop trees" order already works on it.
+    tags: ["tree"],
+    shape: Procedural([
+        Blob(layer: Overlay, material: "example_crystals:crystal_leaf", radius: (7.0, 10.0), roughness: 0.9, density: 0.85),
+        Scatter(layer: Overlay, material: "example_crystals:crystal_spark", radius: 9.0, count: (12, 24)),
+        Circle(layer: Solid, material: "example_crystals:crystal", radius: (2.0, 3.0)),
+    ]),
+    break_fraction: 0.4,
+    drops: [DropDef(item: "core:wood", min: 2, max: 4)],
+    hooks: {"on_destroyed": "shatter"},
+)

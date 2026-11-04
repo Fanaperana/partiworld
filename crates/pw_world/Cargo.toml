@@ -1,0 +1,8 @@
+[package]
+name = "pw_world"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pw_core.workspace = true
+serde.workspace = true

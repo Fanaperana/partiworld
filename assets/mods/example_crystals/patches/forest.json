@@ -1,0 +1,8 @@
+[
+    {
+        "target": "biome:core:forest",
+        "append": {
+            "scatter": [{ "object": "example_crystals:crystal_tree", "spacing": 11, "chance": 0.25 }]
+        }
+    }
+]

@@ -1,0 +1,71 @@
+// Biomes are tested from highest priority down; the first whose ranges
+// match the climate (elevation, moisture, temperature, all 0..1) wins.
+[
+    BiomeDef(
+        id: "core:deep_lake", name: "Deep lake", priority: 100,
+        elevation: (0.0, 0.25),
+        floor: [("core:deep_water", 1.0)],
+    ),
+    BiomeDef(
+        id: "core:shallows", name: "Shallows", priority: 90,
+        elevation: (0.25, 0.30),
+        floor: [("core:water", 1.0)],
+    ),
+    BiomeDef(
+        id: "core:beach", name: "Beach", priority: 80,
+        elevation: (0.30, 0.335),
+        floor: [("core:sand", 0.9), ("core:dirt", 0.1)],
+    ),
+    BiomeDef(
+        id: "core:mountain", name: "Mountain", priority: 70,
+        elevation: (0.70, 1.0),
+        floor: [("core:rock_floor", 1.0)],
+        solid: "core:stone",
+        veins: [
+            VeinDef(material: "core:iron_ore", threshold: 0.78, frequency: 0.02),
+            VeinDef(material: "core:gold_ore", threshold: 0.86, frequency: 0.035),
+        ],
+    ),
+    BiomeDef(
+        id: "core:foothills", name: "Foothills", priority: 60,
+        elevation: (0.64, 0.70),
+        floor: [("core:dirt", 0.4), ("core:dry_grass", 0.3), ("core:grass", 0.3)],
+        scatter: [
+            ScatterDef(object: "core:boulder", spacing: 3, chance: 0.35),
+            ScatterDef(object: "core:shrub", spacing: 5, chance: 0.3),
+            ScatterDef(object: "core:pine_tree", spacing: 6, chance: 0.25),
+        ],
+    ),
+    BiomeDef(
+        id: "core:desert", name: "Dry plains", priority: 55,
+        moisture: (0.0, 0.32), temperature: (0.55, 1.0),
+        floor: [("core:sand", 0.55), ("core:dry_grass", 0.3), ("core:dirt", 0.15)],
+        scatter: [
+            ScatterDef(object: "core:boulder", spacing: 10, chance: 0.3),
+            ScatterDef(object: "core:shrub", spacing: 8, chance: 0.3),
+        ],
+    ),
+    BiomeDef(
+        id: "core:forest", name: "Forest", priority: 50,
+        moisture: (0.53, 1.0),
+        floor: [("core:grass", 0.6), ("core:leaf_litter", 0.3), ("core:dirt", 0.1)],
+        scatter: [
+            ScatterDef(object: "core:oak_tree", spacing: 4, chance: 0.6),
+            ScatterDef(object: "core:pine_tree", spacing: 5, chance: 0.3),
+            ScatterDef(object: "core:berry_bush", spacing: 7, chance: 0.3),
+            ScatterDef(object: "core:shrub", spacing: 5, chance: 0.3),
+            ScatterDef(object: "core:flowers", spacing: 8, chance: 0.2),
+        ],
+    ),
+    BiomeDef(
+        id: "core:grassland", name: "Grassland", priority: 0,
+        floor: [("core:grass", 0.75), ("core:dry_grass", 0.15), ("core:dirt", 0.1)],
+        scatter: [
+            ScatterDef(object: "core:oak_tree", spacing: 9, chance: 0.35),
+            ScatterDef(object: "core:berry_bush", spacing: 9, chance: 0.35),
+            ScatterDef(object: "core:shrub", spacing: 6, chance: 0.3),
+            ScatterDef(object: "core:flowers", spacing: 5, chance: 0.4),
+            ScatterDef(object: "core:boulder", spacing: 14, chance: 0.3),
+        ],
+    ),
+]
