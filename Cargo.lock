@@ -4993,6 +4993,7 @@ dependencies = [
  "pw_mods",
  "pw_render",
  "pw_save",
+ "serde",
 ]
 
 [[package]]

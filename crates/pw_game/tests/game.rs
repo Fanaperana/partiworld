@@ -661,3 +661,74 @@ fn debug_wildlife() {
     }
     let _ = &mut causes;
 }
+
+#[test]
+fn world_events_reach_scripts() {
+    let mut g = new_game(4);
+    run(&mut g, 2, |_| false);
+    // Force a storm: the example mod throws lightning every few hours.
+    g.env.weather = "core:storm".into();
+    g.env.weather_until = g.tick + DAY_TICKS;
+    run(&mut g, (HOUR_TICKS * 8) as u32, |_| false);
+    assert!(g.log.iter().any(|m| m.contains("thunderstorm")), "on_weather not called: {:?}", g.log);
+    assert!(!g.log.iter().any(|m| m.contains("failed")), "{:?}", g.log);
+    // Seasons change after a season's days.
+    let season_ticks = DAY_TICKS * g.content.climate.days_per_season as u64;
+    g.tick = season_ticks - 2;
+    run(&mut g, 5, |_| false);
+    assert_eq!(g.season_name(), "Summer");
+    let info = g.world_info();
+    assert!(info.counts.get("core:colonist").copied().unwrap_or(0) >= 3);
+}
+
+fn roundtrip<T: serde::Serialize + serde::de::DeserializeOwned + Def>(r: &Registry<T>) {
+    for (_, d) in r.iter() {
+        let text = pw_mods::to_ron(d).unwrap();
+        let back: T = pw_mods::parse_ron(&text).unwrap_or_else(|e| panic!("{}: {e}\n{text}", d.def_id()));
+        assert_eq!(back.def_id(), d.def_id());
+    }
+}
+
+#[test]
+fn every_definition_can_be_edited_as_text() {
+    let g = new_game(1);
+    let c = &g.content;
+    roundtrip(&c.materials);
+    roundtrip(&c.items);
+    roundtrip(&c.objects);
+    roundtrip(&c.biomes);
+    roundtrip(&c.reactions);
+    roundtrip(&c.jobs);
+    roundtrip(&c.creatures);
+    roundtrip(&c.powers);
+    let _: ClimateDef = pw_mods::parse_ron(&pw_mods::to_ron(&c.climate).unwrap()).unwrap();
+    let _: WorldGenDef = pw_mods::parse_ron(&pw_mods::to_ron(&c.worldgen).unwrap()).unwrap();
+}
+
+#[test]
+fn live_content_changes_apply_to_the_running_world() {
+    let mut g = new_game(1);
+    // Recolour grass and add a brand-new material, live.
+    let mut c = (*g.content).clone();
+    let mut grass = c.materials.get("core:grass").unwrap().clone();
+    grass.color = "#ff00ff".into();
+    c.materials.insert(grass, "user");
+    let mut new = c.materials.get("core:stone").unwrap().clone();
+    new.id = "user:marble".into();
+    new.name = "Marble".into();
+    c.materials.insert(new, "user");
+    c.link().unwrap();
+    g.swap_content(c).expect("compatible change");
+    let gm = g.content.mat("core:grass").unwrap();
+    assert_eq!(g.content.mat_rt(gm).color, [255, 0, 255, 255]);
+    assert!(g.content.mat("user:marble").is_some());
+    run(&mut g, 10, |_| false);
+
+    // A fresh load without the new material would reorder ids: refused.
+    let (fresh, _, _) = pw_mods::load_all(&mods_dir());
+    assert!(g.swap_content(fresh).is_err());
+    // Reloading from disk into a world that matches it works.
+    let mut g = new_game(2);
+    assert!(g.reload_mods().is_ok());
+    run(&mut g, 10, |_| false);
+}

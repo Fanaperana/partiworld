@@ -1,0 +1,5 @@
+id = "example_events"
+name = "Living sky"
+version = "0.1.0"
+description = "Example of world events in script: storms throw lightning, summer nights bring the odd meteor."
+depends = ["core"]

@@ -677,18 +677,29 @@ impl Life {
                 (A_EAT, Target::Tile(t)) if t == c.tile() && c.work % 10 == 0 => {
                     let mut ate = false;
                     if let Some((mask, leaves, e)) = tile_food(world, &rt.graze, t) {
-                        let mut n = 0;
-                        for (x, y) in World::tile_cells(t) {
-                            if n >= 3 {
-                                break;
+                        // Nibble the nearest bits around the mouth, a little at random,
+                        // so grazed patches come out round and ragged, not square.
+                        let (mx, my) = (c.pos.0 + rng.range_f32(-1.5, 1.5), c.pos.1 + rng.range_f32(-1.5, 1.5));
+                        let mut bites: Vec<(f32, i32, i32)> = Vec::new();
+                        let r = 5;
+                        for dy in -r..=r {
+                            for dx in -r..=r {
+                                let (x, y) = (mx as i32 + dx, my as i32 + dy);
+                                let d = ((x as f32 + 0.5 - mx).powi(2) + (y as f32 + 0.5 - my).powi(2)).sqrt();
+                                if d > r as f32 {
+                                    continue;
+                                }
+                                let m = world.get(x, y, Layer::Floor);
+                                if mask.get(m as usize).copied().unwrap_or(false) {
+                                    bites.push((d + rng.f32() * 1.5, x, y));
+                                }
                             }
-                            let m = world.get(x, y, Layer::Floor);
-                            if mask.get(m as usize).copied().unwrap_or(false) {
-                                world.set(content, x, y, Layer::Floor, leaves, NO_OBJ);
-                                c.energy = (c.energy + e).min(max_e);
-                                n += 1;
-                                ate = true;
-                            }
+                        }
+                        bites.sort_by(|a, b| a.0.total_cmp(&b.0));
+                        for &(_, x, y) in bites.iter().take(3) {
+                            world.set(content, x, y, Layer::Floor, leaves, NO_OBJ);
+                            c.energy = (c.energy + e).min(max_e);
+                            ate = true;
                         }
                     }
                     if !ate {

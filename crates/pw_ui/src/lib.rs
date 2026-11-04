@@ -1,5 +1,6 @@
 //! Player-facing UI: camera, mouse tools, panels and the object editor.
 
+mod data_editor;
 mod editor;
 
 use std::path::PathBuf;
@@ -14,6 +15,7 @@ use pw_core::*;
 use pw_game::Game;
 use pw_render::{GameRes, MainCamera, RenderSettings, SimClock};
 
+pub use data_editor::DataEditor;
 pub use editor::Editor;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -53,6 +55,10 @@ pub struct UiState {
     pub show_help: bool,
     pub show_work: bool,
     pub show_life: bool,
+    pub show_data: bool,
+    pub data: DataEditor,
+    /// Reload mods from disk when their files change.
+    pub live_reload: bool,
     /// Selected colonist (pawn id) and whether the camera follows it.
     pub selected: Option<u32>,
     pub follow: bool,
@@ -82,6 +88,9 @@ impl Default for UiState {
             show_help: true,
             show_work: false,
             show_life: false,
+            show_data: false,
+            data: DataEditor::default(),
+            live_reload: true,
             selected: None,
             follow: false,
             last_build: "core:wall_wood".into(),
@@ -137,8 +146,54 @@ impl Plugin for PwUiPlugin {
             .add_systems(Startup, init_ui)
             .add_systems(Update, camera_keys.run_if(not(egui_wants_any_keyboard_input)))
             .add_systems(Update, (camera_mouse, world_tools).chain().run_if(not(egui_wants_any_pointer_input)))
-            .add_systems(Update, (draw_tool_preview, follow_camera))
+            .add_systems(Update, (draw_tool_preview, follow_camera, watch_mods))
             .add_systems(EguiPrimaryContextPass, ui_panels);
+    }
+}
+
+/// A cheap fingerprint of every file under the mods folder (names, sizes, times).
+fn mods_fingerprint(dir: &std::path::Path) -> u64 {
+    fn walk(p: &std::path::Path, h: &mut u64) {
+        let Ok(rd) = std::fs::read_dir(p) else { return };
+        let mut entries: Vec<_> = rd.flatten().collect();
+        entries.sort_by_key(|e| e.path());
+        for e in entries {
+            let path = e.path();
+            if path.is_dir() {
+                walk(&path, h);
+            } else if let Ok(m) = e.metadata() {
+                let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as u64).unwrap_or(0);
+                *h = splitmix64(*h ^ hash_str(&path.to_string_lossy()) ^ m.len() ^ t);
+            }
+        }
+    }
+    let mut h = 0;
+    walk(dir, &mut h);
+    h
+}
+
+/// Hot reload: when a mod file changes on disk, reload mods into the running world.
+fn watch_mods(time: Res<Time>, mut ui: ResMut<UiState>, mut game: ResMut<GameRes>, mut state: Local<(f32, u64)>) {
+    state.0 -= time.delta_secs();
+    if state.0 > 0.0 {
+        return;
+    }
+    state.0 = 1.0;
+    let fp = mods_fingerprint(&game.0.mods_dir);
+    if state.1 == 0 {
+        state.1 = fp;
+        return;
+    }
+    if fp == state.1 {
+        return;
+    }
+    state.1 = fp;
+    if !ui.live_reload {
+        return;
+    }
+    match game.0.reload_mods() {
+        Ok(m) => ui.toast(format!("{m} (files changed)")),
+        Err(e) => ui.toast(format!("Mod reload: {e}")),
     }
 }
 
@@ -224,6 +279,9 @@ fn camera_keys(
     }
     if keys.just_pressed(KeyCode::KeyL) {
         ui.show_life = !ui.show_life;
+    }
+    if keys.just_pressed(KeyCode::F2) {
+        ui.show_data = !ui.show_data;
     }
     if keys.just_pressed(KeyCode::F5) {
         quick_save(&game.0, &mut ui);
@@ -769,7 +827,11 @@ fn ui_panels(
                 if ui.button("🎨 Object editor").clicked() {
                     st.show_editor = !st.show_editor;
                 }
+                if ui.button("🛠 Data editor (F2)").on_hover_text("See and change how anything in the game is defined").clicked() {
+                    st.show_data = !st.show_data;
+                }
                 ui.collapsing("World", |ui| {
+                    ui.checkbox(&mut st.live_reload, "Live reload mods").on_hover_text("Pick up changes to mod files while playing");
                     ui.horizontal(|ui| {
                         ui.label("Seed");
                         ui.add(egui::TextEdit::singleline(&mut st.seed_text).desired_width(90.0));
@@ -944,6 +1006,18 @@ fn ui_panels(
             ui.label("Right click or Esc: back to Inspect. R: hide canopies and roofs. V: see-through roofs.");
             ui.label("F5 save, F9 load. Object editor: paint your own trees, houses and props.");
         });
+    }
+
+    if st.show_data {
+        let mut open = true;
+        let mut msg = None;
+        egui::Window::new("Data editor").open(&mut open).default_pos([240.0, 70.0]).show(&ctx, |ui| {
+            msg = st.data.ui(ui, g);
+        });
+        if let Some(m) = msg {
+            st.toast(m);
+        }
+        st.show_data = open;
     }
 
     if st.show_life {

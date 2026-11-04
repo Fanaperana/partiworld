@@ -75,6 +75,8 @@ pub struct Game {
     pub last_build_error: Option<String>,
     /// Recent flashes (x, y, radius, tick) for the renderer: lightning, meteors.
     pub flashes: Vec<(f32, f32, f32, u64)>,
+    last_season: String,
+    last_weather: String,
     pool: GenPool,
     /// Chunks wanted by the camera; set by the front end each frame.
     pub view: Option<(ChunkPos, ChunkPos)>,
@@ -103,6 +105,8 @@ impl Game {
             life: Life::default(),
             last_build_error: None,
             flashes: Vec::new(),
+            last_season: String::new(),
+            last_weather: String::new(),
             pool: GenPool::new(threads),
             view: None,
         };
@@ -180,6 +184,48 @@ impl Game {
         }
     }
 
+    /// Swap in changed content while the world keeps running (live editing,
+    /// hot reload). Existing materials, objects, items, jobs and creatures
+    /// must keep their place (new ones may be added at the end), because the
+    /// world stores them by index.
+    pub fn swap_content(&mut self, content: Content) -> Result<(), String> {
+        let old = &self.content;
+        let prefix = |what: &str, a: Vec<String>, b: Vec<String>| -> Result<(), String> {
+            if b.len() >= a.len() && a.iter().zip(&b).all(|(x, y)| x == y) {
+                Ok(())
+            } else {
+                Err(format!("{what} were removed or reordered; start a new world to use this change"))
+            }
+        };
+        prefix("materials", old.materials.ids(), content.materials.ids())?;
+        prefix("objects", old.objects.ids(), content.objects.ids())?;
+        prefix("items", old.items.ids(), content.items.ids())?;
+        prefix("jobs", old.jobs.ids(), content.jobs.ids())?;
+        prefix("creatures", old.creatures.ids(), content.creatures.ids())?;
+        let content = Arc::new(content);
+        // Colours, walk costs and reactions may have changed: refresh every chunk.
+        for ch in self.world.chunks.values_mut() {
+            ch.after_load(&content);
+        }
+        self.content = content;
+        Ok(())
+    }
+
+    /// Reload every mod from disk into the running world (hot reload).
+    pub fn reload_mods(&mut self) -> Result<String, String> {
+        let (content, mut scripts, report) = pw_mods::load_all(&self.mods_dir);
+        if !report.ok() {
+            return Err(report.errors.join(" | "));
+        }
+        self.swap_content(content)?;
+        script::register_api(&mut scripts.engine);
+        for f in &self.ext.script_setup {
+            f(&mut scripts.engine);
+        }
+        self.scripts = scripts;
+        Ok(format!("Reloaded {} mods", self.content.mods.len()))
+    }
+
     /// Replace content (e.g. after the editor added an object). Material ids must stay stable.
     pub fn set_content(&mut self, content: Arc<Content>) {
         self.content = content;
@@ -212,6 +258,7 @@ impl Game {
         if self.tick % 30 == 0 {
             self.collapse_roofs();
         }
+        self.world_events();
 
         for e in events {
             match e {
@@ -237,6 +284,33 @@ impl Game {
             f(self);
         }
         self.tick += 1;
+    }
+
+    /// Time, season and weather events for scripts.
+    fn world_events(&mut self) {
+        if self.scripts.asts.is_empty() {
+            return;
+        }
+        if self.tick % env::HOUR_TICKS == 0 {
+            self.fire_event("on_hour", vec![]);
+        }
+        if self.tick % DAY_TICKS == 0 {
+            let day = (self.tick / DAY_TICKS + 1) as i64;
+            self.fire_event("on_day", vec![day.into()]);
+        }
+        let season = self.season_name().to_string();
+        if self.last_season != season {
+            if !self.last_season.is_empty() {
+                self.fire_event("on_season", vec![season.clone().into()]);
+            }
+            self.last_season = season;
+        }
+        if self.last_weather != self.env.weather {
+            if !self.last_weather.is_empty() {
+                self.fire_event("on_weather", vec![self.env.weather.clone().into()]);
+            }
+            self.last_weather = self.env.weather.clone();
+        }
     }
 
     /// Roofs that lost their wall or rock support fall in and leave debris.
@@ -569,8 +643,12 @@ impl Game {
                 }
                 LifeEvent::NewSpecies { name, from, .. } => {
                     self.message(format!("A new species has appeared: {name}, evolved from {from}."));
+                    self.fire_event("on_new_species", vec![name.into()]);
                 }
-                LifeEvent::Extinct { name } => self.message(format!("The {name} have died out here.")),
+                LifeEvent::Extinct { name } => {
+                    self.message(format!("The {name} have died out here."));
+                    self.fire_event("on_extinct", vec![name.into()]);
+                }
             }
         }
     }
@@ -684,18 +762,60 @@ impl Game {
     }
 
     pub fn call_script(&mut self, owner: &str, name: &str, at: (i32, i32)) {
-        let Some(ast) = self.scripts.resolve(owner, name, 3) else {
+        let Some(ast) = self.scripts.resolve(owner, name, 3).cloned() else {
             self.message(format!("Script function '{name}' not found"));
             return;
         };
+        let fname = ScriptHost::fn_name(name).to_string();
+        self.run_script(&ast, &fname, vec![(at.0 as i64).into(), (at.1 as i64).into()]);
+    }
+
+    /// What scripts can read about the world right now.
+    pub fn world_info(&self) -> script::WorldInfo {
+        let cal = self.calendar();
+        let mut counts: std::collections::HashMap<String, i64> = Default::default();
+        for c in &self.life.creatures {
+            *counts.entry(self.content.creatures.by_idx(c.def).id.clone()).or_insert(0) += 1;
+        }
+        for p in &self.colony.pawns {
+            *counts.entry(self.content.creatures.by_idx(p.creature).id.clone()).or_insert(0) += 1;
+        }
+        let colony = self.colony.pawns.first().map(|p| (p.pos.0 as i32, p.pos.1 as i32)).unwrap_or((0, 0));
+        script::WorldInfo {
+            temp: self.env.temp,
+            season: self.season_name().to_string(),
+            weather: self.env.weather.clone(),
+            hour: cal.hour,
+            day: (self.tick / DAY_TICKS + 1) as i64,
+            year: cal.year as i64,
+            tick: self.tick as i64,
+            colony,
+            counts,
+        }
+    }
+
+    /// Call every mod's `fn <event>(ctx, ...)` if it has one (world events).
+    pub fn fire_event(&mut self, event: &str, args: Vec<rhai::Dynamic>) {
+        let arity = args.len() + 1;
+        let asts: Vec<rhai::AST> = self
+            .scripts
+            .asts
+            .values()
+            .filter(|a| a.iter_functions().any(|f| f.name == event && f.params.len() == arity))
+            .cloned()
+            .collect();
+        for ast in asts {
+            self.run_script(&ast, event, args.clone());
+        }
+    }
+
+    fn run_script(&mut self, ast: &rhai::AST, name: &str, args: Vec<rhai::Dynamic>) {
+        let info = self.world_info();
         let world = std::mem::take(&mut self.world);
-        let ctx = ScriptCtx::new(world, self.content.clone(), self.rng.next_u64());
-        let result = self.scripts.engine.call_fn::<rhai::Dynamic>(
-            &mut rhai::Scope::new(),
-            ast,
-            ScriptHost::fn_name(name),
-            (ctx.clone(), at.0 as i64, at.1 as i64),
-        );
+        let ctx = ScriptCtx::with_info(world, self.content.clone(), self.rng.next_u64(), info);
+        let mut all: Vec<rhai::Dynamic> = vec![rhai::Dynamic::from(ctx.clone())];
+        all.extend(args);
+        let result = self.scripts.engine.call_fn::<rhai::Dynamic>(&mut rhai::Scope::new(), ast, name, all);
         let (world, cmds) = ctx.finish();
         self.world = world;
         if let Err(e) = result {
@@ -717,6 +837,22 @@ impl Game {
                     }
                 }
                 ScriptCmd::Message(m) => self.message(m),
+                ScriptCmd::Spawn { creature, x, y, count } => {
+                    self.spawn_group(&creature, tile_of(x, y), count);
+                }
+                ScriptCmd::Power { id, x, y, radius } => {
+                    if !self.use_power(&id, x, y, radius) {
+                        self.message(format!("Script: unknown power '{id}'"));
+                    }
+                }
+                ScriptCmd::Weather(id) => {
+                    let content = self.content.clone();
+                    if let Some(d) = content.climate.weather.iter().find(|d| d.id == id) {
+                        self.env.weather = id;
+                        self.env.weather_until = self.tick + 6 * env::HOUR_TICKS;
+                        self.env.wind_target = d.wind.1;
+                    }
+                }
             }
         }
     }

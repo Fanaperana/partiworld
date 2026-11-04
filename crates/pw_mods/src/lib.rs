@@ -171,6 +171,46 @@ pub fn parse_ron<T: DeserializeOwned>(text: &str) -> Result<T, String> {
     ron_opts().from_str::<T>(text).map_err(|e| e.to_string())
 }
 
+/// Write data as readable RON that `parse_ron` reads back (optional fields
+/// are written without `Some(...)`).
+pub fn to_ron<T: serde::Serialize>(v: &T) -> Result<String, String> {
+    let pretty = ron::ser::PrettyConfig::new()
+        .struct_names(true)
+        .extensions(ron::extensions::Extensions::IMPLICIT_SOME);
+    ron::ser::to_string_pretty(v, pretty).map_err(|e| e.to_string())
+}
+
+/// Make sure a mod folder with a manifest exists (for content made in game).
+pub fn ensure_user_mod(mods_dir: &Path, mod_id: &str) -> Result<PathBuf, String> {
+    let dir = mods_dir.join(mod_id);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let manifest = dir.join("mod.toml");
+    if !manifest.exists() {
+        let text = format!(
+            "id = \"{mod_id}\"
+name = \"My creations\"
+version = \"0.1.0\"
+description = \"Things made and changed in game.\"
+depends = [\"core\"]
+"
+        );
+        fs::write(&manifest, text).map_err(|e| e.to_string())?;
+    }
+    Ok(dir)
+}
+
+/// Save RON text into a mod: `folder/<file>.ron`, or `<file>.ron` at the mod root.
+pub fn save_text_to_mod(mods_dir: &Path, mod_id: &str, folder: Option<&str>, file: &str, text: &str) -> Result<PathBuf, String> {
+    let mut dir = ensure_user_mod(mods_dir, mod_id)?;
+    if let Some(f) = folder {
+        dir = dir.join(f);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    let path = dir.join(file.replace(':', "_") + ".ron");
+    fs::write(&path, text).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 fn load_dir<T: DeserializeOwned + Def>(
     m: &ModInfo,
     folder: &str,
@@ -348,8 +388,7 @@ pub fn save_object_to_mod(mods_dir: &Path, mod_id: &str, def: &ObjectDef) -> Res
     }
     let file_name = def.id.replace(':', "_") + ".ron";
     let path = objects.join(file_name);
-    let pretty = ron::ser::PrettyConfig::new().struct_names(true);
-    let text = ron::ser::to_string_pretty(def, pretty).map_err(|e| e.to_string())?;
+    let text = to_ron(def)?;
     fs::write(&path, text).map_err(|e| e.to_string())?;
     Ok(path)
 }
