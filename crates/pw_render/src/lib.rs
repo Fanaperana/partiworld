@@ -152,6 +152,8 @@ struct Views {
     pawn_frames: HashMap<u64, Vec<Handle<Image>>>,
     /// Which way each person (pawn key) and animal (id | ANIMAL_BIT) last faced.
     facing: HashMap<u64, usize>,
+    /// Seconds of animation, paused with the game.
+    anim: f32,
     items: HashMap<u64, (Entity, usize, TilePos)>,
     blueprints: HashMap<u32, Entity>,
     item_images: HashMap<usize, Handle<Image>>,
@@ -773,21 +775,38 @@ const ANIMAL_BIT: u64 = 1 << 63;
 
 /// Turn a creature to face the way it last moved (between its last two
 /// tick positions); standing still keeps the old facing.
-fn turn(facing: &mut HashMap<u64, usize>, key: u64, prev: Option<&(f32, f32)>, pos: (f32, f32)) -> usize {
+/// Returns (facing, moving).
+fn turn(facing: &mut HashMap<u64, usize>, key: u64, prev: Option<&(f32, f32)>, pos: (f32, f32)) -> (usize, bool) {
     let f = facing.entry(key).or_insert(0);
+    let mut moving = false;
     if let Some(&(x, y)) = prev {
         let (dx, dy) = (pos.0 - x, pos.1 - y);
         // Ignore tiny shuffles and teleports.
         if dx * dx + dy * dy > 0.0004 && dx * dx + dy * dy < (TILE * TILE * 4) as f32 {
             *f = facing_of(dx, dy);
+            moving = true;
         }
     }
-    *f
+    (*f, moving)
 }
 
-/// Show the frame for a facing on a sprite, mirrored for west-facing views.
-fn show_facing(sprite: &mut Sprite, frames: &[Handle<Image>], s: &SpriteRt, facing: usize) {
-    let (frame, flip) = s.facing[facing];
+/// Step of a looping animation running at `rate` frames a second.
+fn beat(t: f32, rate: f32) -> usize {
+    (t * rate).max(0.0) as usize
+}
+
+/// A pose if the sprite has it (mirrored when facing west), else the view
+/// for the facing. Returns (frame, mirrored).
+fn pick_frame(s: &SpriteRt, facing: usize, pose: Option<&str>) -> (u8, bool) {
+    match pose.and_then(|p| s.poses.get(p)) {
+        Some(&f) => (f, (5..=7).contains(&facing)),
+        None => s.facing[facing],
+    }
+}
+
+/// Show a frame. Returns how far to raise the sprite so its feet stay on
+/// the front view's bottom line (poses can be shorter or taller).
+fn show_frame(sprite: &mut Sprite, frames: &[Handle<Image>], s: &SpriteRt, (frame, flip): (u8, bool)) -> f32 {
     if let Some(img) = frames.get(frame as usize) {
         if sprite.image != *img {
             sprite.image = img.clone();
@@ -795,6 +814,62 @@ fn show_facing(sprite: &mut Sprite, frames: &[Handle<Image>], s: &SpriteRt, faci
     }
     if sprite.flip_x != flip {
         sprite.flip_x = flip;
+    }
+    (s.frame_rt(frame).h as f32 - s.h as f32) * 0.5
+}
+
+/// What a person is doing, as a sprite pose (`t` is their animation clock).
+/// None shows the plain view for their facing.
+fn pawn_pose(p: &pw_colony::Pawn, moving: bool, facing: usize, t: f32) -> Option<&'static str> {
+    use pw_colony::JobKind as J;
+    let side = !matches!(facing, 0 | 4);
+    if moving {
+        if !side {
+            return None;
+        }
+        if p.carrying.is_some() {
+            return Some("carry");
+        }
+        return Some(if beat(t, 6.0) % 2 == 0 { "run" } else { "idle" });
+    }
+    let arrived = p.path.is_empty();
+    match p.job.as_ref().map(|j| &j.kind) {
+        Some(J::Sleep { .. }) if arrived => return Some("sleep"),
+        Some(J::Eat { .. }) if arrived => return Some("eat"),
+        Some(J::Work { .. } | J::Construct { .. }) if arrived => {
+            return Some(if beat(t, 2.5) % 2 == 0 { "work" } else { "idle" });
+        }
+        _ => {}
+    }
+    if p.needs.health < 0.3 {
+        return Some("hurt");
+    }
+    None
+}
+
+/// Same for a wild animal.
+fn animal_pose(c: &pw_life::Creature, s: &SpriteRt, moving: bool, facing: usize, t: f32) -> Option<&'static str> {
+    use pw_life::{A_EAT, A_FLEE, A_HUNT, A_REST};
+    let has = |p: &str| s.poses.contains_key(p);
+    if moving {
+        if matches!(facing, 0 | 4) {
+            return None;
+        }
+        let fast = matches!(c.action, A_FLEE | A_HUNT);
+        let rate = if fast { 8.0 } else { 5.0 };
+        let other = if fast && has("leap") { "leap" } else { "idle" };
+        return Some(if beat(t, rate) % 2 == 0 { "run" } else { other });
+    }
+    match c.action {
+        A_REST => Some("sleep"),
+        A_HUNT => Some("attack"),
+        A_EAT => {
+            let opts: Vec<&'static str> = ["graze", "eat", "graze2"].into_iter().filter(|p| has(p)).collect();
+            opts.get(beat(t, 0.6) % opts.len().max(1)).copied()
+        }
+        // Standing about: now and then sit up or sniff around.
+        _ if beat(t, 0.4) % 3 == 1 => ["sit", "sniff"].into_iter().find(|p| has(p)),
+        _ => None,
     }
 }
 
@@ -924,8 +999,12 @@ fn sync_pawns(
     mut bodies: Query<(&mut Transform, &mut Sprite), (With<PawnSprite>, Without<CarrySprite>, Without<ShadowSprite>)>,
     mut shadows: Query<&mut Transform, (With<ShadowSprite>, Without<CarrySprite>, Without<PawnSprite>)>,
     clock: Res<SimClock>,
+    time: Res<Time>,
 ) {
     let g = &game.0;
+    if clock.speed > 0 {
+        views.anim += time.delta_secs();
+    }
     let live: HashSet<u64> = g.all_pawns().map(|(o, p)| pawn_key(o, p.id)).collect();
     let gone: Vec<u64> = views.pawns.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
@@ -940,7 +1019,13 @@ fn sync_pawns(
         let key = pawn_key(owner, p.id);
         let d = clock.draw_pos_of(owner, p);
         let spr = &g.content.creature_rt[p.creature].sprite;
-        let face = turn(&mut views.facing, key, clock.prev.get(&key), p.pos);
+        let (face, moving) = turn(&mut views.facing, key, clock.prev.get(&key), p.pos);
+        // Everyone on their own beat.
+        let t = views.anim + (p.id % 7) as f32 * 0.37;
+        let pose = pawn_pose(p, moving, face, t);
+        let frame = pick_frame(spr, face, pose);
+        // A little bob when walking towards or away from the viewer.
+        let bob = if moving && pose.is_none() && beat(t, 6.0) % 2 == 0 { 1.0 } else { 0.0 };
         let pos = Transform::from_xyz(d.x, d.y, 10.0);
         let carry_pos = Transform::from_xyz(d.x + 3.0, d.y + 4.0, 11.0);
         // Shadow under the feet: sprites are centred, so drop by half the height.
@@ -951,7 +1036,7 @@ fn sync_pawns(
                 if let Ok((mut t, mut s)) = bodies.get_mut(e) {
                     t.translation = pos.translation;
                     if let Some(frames) = views.pawn_frames.get(&key) {
-                        show_facing(&mut s, frames, spr, face);
+                        t.translation.y += show_frame(&mut s, frames, spr, frame) + bob;
                     }
                 }
                 if let Ok(mut t) = shadows.get_mut(sh) {
@@ -976,7 +1061,8 @@ fn sync_pawns(
             None => {
                 let frames = sprite_frames(&mut images, spr, &p.slots);
                 let mut body = Sprite::from_image(frames[0].clone());
-                show_facing(&mut body, &frames, spr, face);
+                let mut pos = pos;
+                pos.translation.y += show_frame(&mut body, &frames, spr, frame);
                 views.pawn_frames.insert(key, frames);
                 let e = commands.spawn((body, pos, PawnSprite)).id();
                 let c = commands
@@ -1036,7 +1122,11 @@ fn sync_animals(
         let key = (c.def, pick as u8, (hue + 6) as u8);
         let at = clock.draw_pos_life(c);
         let spr = &g.content.creature_rt[c.def].sprite;
-        let face = turn(&mut views.facing, c.id as u64 | ANIMAL_BIT, clock.prev_life.get(&c.id), c.pos);
+        let (face, moving) = turn(&mut views.facing, c.id as u64 | ANIMAL_BIT, clock.prev_life.get(&c.id), c.pos);
+        let tt = views.anim + (c.id % 11) as f32 * 0.29;
+        let pose = animal_pose(c, spr, moving, face, tt);
+        let frame = pick_frame(spr, face, pose);
+        let bob = if moving && pose.is_none() && beat(tt, 6.0) % 2 == 0 { 1.0 } else { 0.0 };
         let scale = (c.genes[pw_life::G_SIZE] * if c.age < 2 * pw_game::DAY_TICKS { 0.75 } else { 1.0 }).clamp(0.5, 2.0);
         let t = Transform::from_xyz(at.x, at.y, 9.5).with_scale(Vec3::splat(scale));
         match views.animals.get(&c.id) {
@@ -1044,7 +1134,7 @@ fn sync_animals(
                 if let Ok((mut tr, mut s)) = q.get_mut(e) {
                     *tr = t;
                     if let Some(frames) = views.animal_images.get(&key) {
-                        show_facing(&mut s, frames, spr, face);
+                        tr.translation.y += (show_frame(&mut s, frames, spr, frame) + bob) * scale;
                     }
                 }
             }
@@ -1081,7 +1171,8 @@ fn sync_animals(
                 let sh = Transform::from_xyz(0.5, -(spr.h as f32) * 0.5 + 0.5, -0.5)
                     .with_scale(Vec3::new((spr.w as f32 + 2.0) / 10.0, 1.0, 1.0));
                 let mut body = Sprite::from_image(frames[0].clone());
-                show_facing(&mut body, &frames, spr, face);
+                let mut t = t;
+                t.translation.y += show_frame(&mut body, &frames, spr, frame) * scale;
                 let e = commands.spawn((body, t, AnimalSprite, children![(Sprite::from_image(shadow), sh)])).id();
                 views.animals.insert(c.id, (e, key));
             }

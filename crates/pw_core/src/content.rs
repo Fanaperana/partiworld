@@ -266,8 +266,11 @@ pub struct SpriteRt {
     /// Row-major, top row first. Slot pixels hold the slot index in `slots` until filled.
     pub pixels: Vec<[u8; 4]>,
     pub slots: Vec<(usize, String)>,
-    /// Extra drawn facings; frame 0 is this sprite itself, frame i is `views[i - 1]`.
+    /// Extra frames (drawn facings, then poses); frame 0 is this sprite
+    /// itself, frame i is `views[i - 1]`.
     pub views: Vec<SpriteRt>,
+    /// Action pose name -> frame.
+    pub poses: BTreeMap<String, u8>,
     /// For each of the 8 directions (see `FACINGS`): which frame to show
     /// and whether to mirror it.
     pub facing: [(u8, bool); 8],
@@ -302,7 +305,18 @@ impl SpriteRt {
         for d in 0..8 {
             base.facing[d] = Self::resolve(&drawn, d);
         }
+        for (name, rows) in &def.poses {
+            let mut f = Self::frame(&def.palette, rows)?;
+            f.outline = def.outline;
+            base.views.push(f);
+            base.poses.insert(name.clone(), base.views.len() as u8);
+        }
         Ok(base)
+    }
+
+    /// Frame `i` (0 = the front view).
+    pub fn frame_rt(&self, i: u8) -> &SpriteRt {
+        if i == 0 { self } else { self.views.get(i as usize - 1).unwrap_or(self) }
     }
 
     /// Pick a frame for facing `d`: its own drawing, else its mirror image,
@@ -338,7 +352,7 @@ impl SpriteRt {
                 }
             }
         }
-        Ok(SpriteRt { w, h, pixels, slots, views: Vec::new(), facing: [(0, false); 8], outline: true })
+        Ok(SpriteRt { w, h, pixels, slots, views: Vec::new(), poses: BTreeMap::new(), facing: [(0, false); 8], outline: true })
     }
 
     /// A little pile of particles in one colour, for items without a sprite.
@@ -364,7 +378,7 @@ impl SpriteRt {
                 }
             }
         }
-        SpriteRt { w: 4, h: 5, pixels, slots: Vec::new(), views: Vec::new(), facing: [(0, false); 8], outline: true }
+        SpriteRt { w: 4, h: 5, pixels, slots: Vec::new(), views: Vec::new(), poses: BTreeMap::new(), facing: [(0, false); 8], outline: true }
     }
 }
 
@@ -814,6 +828,17 @@ mod facing_tests {
             def.views.insert(v.to_string(), vec!["x".into()]);
         }
         SpriteRt::compile(&def).unwrap()
+    }
+
+    #[test]
+    fn poses_come_after_views() {
+        let mut def = SpriteDef { palette: [('x', "#ffffff".to_string())].into(), rows: vec!["x".into()], outline: true, ..Default::default() };
+        def.views.insert("e".into(), vec!["x".into()]);
+        def.poses.insert("sleep".into(), vec!["xxx".into()]);
+        let s = SpriteRt::compile(&def).unwrap();
+        assert_eq!(s.poses["sleep"], 2);
+        assert_eq!(s.frame_rt(2).w, 3);
+        assert_eq!(s.facing[2], (1, false));
     }
 
     #[test]

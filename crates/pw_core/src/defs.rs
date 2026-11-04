@@ -129,6 +129,11 @@ pub struct SpriteDef {
     /// other missing facing borrows the nearest one drawn.
     #[serde(default)]
     pub views: BTreeMap<String, Vec<String>>,
+    /// Action poses by name, drawn facing east and mirrored for west.
+    /// The game uses "idle", "run", "leap", "work", "carry", "eat", "graze",
+    /// "graze2", "sleep", "attack" and "hurt" when a sprite has them.
+    #[serde(default)]
+    pub poses: BTreeMap<String, Vec<String>>,
     /// Add a dark outline around the shape. Turn off for art that draws its own.
     #[serde(default = "yes")]
     pub outline: bool,
