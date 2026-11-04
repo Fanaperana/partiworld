@@ -2,7 +2,7 @@
 
 **A top-down colony sim where the whole world is made of particles.**
 
-Every tree, rock, wall, roof and patch of grass is a group of tiny particles. You can chop a tree and watch it wear away bit by bit, mine a hillside cell by cell, or set a dry meadow alight and watch the wind carry the fire. You play it like RimWorld: mark the work, plan the buildings, and your colonists get on with it. The world is generated from a seed, it goes on forever, and it changes with the seasons.
+Every tree, rock, wall, roof and patch of grass is a group of tiny particles. You can chop a tree and watch it wear away bit by bit, mine a hillside cell by cell, or set a dry meadow alight and watch the wind carry the fire. You play it like RimWorld: mark the work, plan the buildings, and your colonists get on with it. You can also play it like WorldBox: drop meteors, pour lava, flood valleys, and release animals that breed, learn and evolve into new species. The world is generated from a seed, it goes on forever, and it changes with the seasons.
 
 Built in Rust with [Bevy](https://bevyengine.org/). Everything is moddable with data files and [Rhai](https://rhai.rs/) scripts.
 
@@ -24,6 +24,14 @@ Built in Rust with [Bevy](https://bevyengine.org/). Everything is moddable with 
   <tr>
     <td align="center"><sub>Colonists hauling wood and raising walls</sub></td>
     <td align="center"><sub>Roofs fade so you can see who's inside</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/wildlife.png" alt="Rabbits and a deer herd grazing around the colony"></td>
+    <td><img src="docs/screenshots/powers.png" alt="A meteor crater with a lava core, and a lava flow"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Rabbits and deer grazing round patches into the meadow</sub></td>
+    <td align="center"><sub>A meteor crater with a molten core, and poured lava</sub></td>
   </tr>
 </table>
 
@@ -55,9 +63,23 @@ The number is the world seed; leave it out for the default world. The first buil
 - **Day and night:** dawn glow, bright days, orange dusks, dark nights.
 - **Plants follow the climate.** Growth speeds up in spring and stops in the frost. Grass only spreads when it's warm.
 
+**Living things that evolve**
+- **Rabbits, deer and wolves** live on their own. They graze grass (eating round patches into the meadow), browse bushes, hunt, flee, gather in herds and packs, rest at night, breed and die. Their meat and hide are left behind for your colony.
+- **Genes:** every animal carries speed, size, sight, metabolism, fertility, boldness, cold tolerance, lifespan and colour. Each one has a trade-off: fast animals burn more food, and thick fur overheats in summer. Children inherit a mix of their parents' genes with small mutations, so winters favour woolly animals and wolves favour fast rabbits.
+- **Learning:** each animal has a small brain that weighs its options (eat, flee, hunt, mate, herd, wander, rest). It learns from what paid off, and its young start from what their parents learned.
+- **New species:** when a lineage drifts far enough from its ancestors it gets a name of its own, like *Woolly Rabbit* or *Swift Wolf*, and shows up in the **Life** window (L) with its population trend and family tree.
+- **Plants spread:** oaks, pines and berry bushes seed new saplings nearby, so forests creep outward and regrow after a fire.
+
+**Physics**
+- Water fills dug channels, freezes into walkable ice in winter and thaws in spring.
+- Lava flows, sets things alight, boils water into steam, turns sand into glass and cools into basalt.
+- Smoke and steam drift with the wind and fade.
+
 **Play god**
-- Paint any material, drop any object, start fires, add colonists.
+- **Powers:** lightning, rain, thunderstorm, blizzard, clear sky, meteor, earthquake, lava, firestorm, water, dig, raise rock, fertilize, freeze. You can also release rabbits, deer, wolves or colonists. Every power is a data file, so mods can add more.
+- Paint any material, drop any object, start fires.
 - Draw your own trees, props and buildings in the **object editor**. They're saved as a mod and work in the game right away.
+- Change anything in the **data editor** (F2): open any material, object, reaction, creature, power, biome, the climate or world generation as text. Edit it and apply it to the running world, or save it to your own mod.
 
 ## Controls
 
@@ -71,7 +93,8 @@ The number is the world seed; leave it out for the default world. The first buil
 | C / M / G / X | Chop, mine, harvest, cancel orders |
 | Z / B / T | Stockpile zone, build (last pick), plant (last pick) |
 | Click a colonist, F | Select, follow with the camera |
-| P | Work priorities |
+| P / L | Work priorities / wild life and evolution |
+| F2 | Data editor |
 | R / V | Hide roofs and tree tops / see-through roofs |
 | F5 / F9 | Quick save / load |
 | H | Help |
@@ -99,6 +122,7 @@ The simulation has no dependency on the game engine. It runs headless, which is 
 | `pw_worldgen` | Seeded noise to biomes, ground, mountains, ore veins and scattered plants, generated on background threads |
 | `pw_sim` | Particle reactions from data (fire, grass, ash), affected by wind, rain and temperature |
 | `pw_colony` | Colonists, pathfinding, orders, jobs, hauling, stockpiles, construction |
+| `pw_life` | Wild animals: perception, decisions, a learning brain, genes, breeding, evolution and species |
 | `pw_game` | The tick loop, seasons and weather, chunk streaming, player tools, script API, Rust plugin hooks |
 | `pw_save` | Saves only the chunks you changed; content is saved by id so saves survive mod changes |
 | `pw_render` | Chunk textures, sprites, lighting and weather effects, all drawn from particle data (no sprite files) |
@@ -106,7 +130,7 @@ The simulation has no dependency on the game engine. It runs headless, which is 
 
 ## Modding
 
-The base game is itself a mod (`assets/mods/core`). A mod is a folder in `assets/mods/` with a `mod.toml`; click **New world** in game to reload every mod from disk.
+The base game is itself a mod (`assets/mods/core`): every material, plant, animal, reaction, power, season and weather in it is a data file you can read, copy and change. A mod is a folder in `assets/mods/` with a `mod.toml`. Edit a mod's files while the game runs and it reloads them on the spot (**live reload**, on by default in Tools > World).
 
 ```
 assets/mods/my_mod/
@@ -115,12 +139,15 @@ assets/mods/my_mod/
   items/*.ron
   objects/*.ron     painted patterns or procedural shapes (circle, blob, rect, scatter)
   biomes/*.ron      climate ranges, ground mix, mountains, ore veins, what grows there
-  reactions/*.ron   particle rules: input, neighbour, chance, effects, weather
+  reactions/*.ron   particle rules: input, neighbour, chance, effects, swap (movement),
+                    weather (wet, windy), temperature range
   jobs/*.ron        new orders = a built-in behaviour + target tags
-  creatures/*.ron
+  creatures/*.ron   colonists, or wild animals with a `life` section: diet, enemies,
+                    size, sight, lifespan, litter, herding, cold limit, mutation rate
+  powers/*.ron      god powers: paint, ignite, place, spawn, weather, script, flash
   climate.ron       seasons, day length, temperatures, weather
   patches/*.json    change other mods' data ("set" / "append")
-  scripts/*.rhai    hooks like fn on_destroyed(ctx, x, y)
+  scripts/*.rhai    object hooks like fn on_destroyed(ctx, x, y), and world events
 ```
 
 A whole new material and how it burns, with no Rust:
@@ -137,8 +164,34 @@ ReactionDef(id: "my_mod:peat_smoulder", layer: Floor, input: "core:fire",
     effects: [EffectDef(target: Other, set: "core:fire")])
 ```
 
+A new animal is one entry: a sprite and a `life` section. For example, a fox that hunts only small prey and fears wolves:
+
+```ron
+CreatureDef(id: "my_mod:fox", name: "Fox", speed: 4.2,
+    sprite: SpriteDef(palette: {'F': "$fur"}, rows: ["F...F", "FFFFF", ".FFF.", "..F.."]),
+    slots: {"fur": ["#c8642c", "#b0582a"]},
+    life: LifeDef(tags: ["predator"], diet: [Hunt(tags: ["small"], energy: 0.9)],
+        flees: ["large_predator"], size: 0.5, lifespan_days: 14.0, litter: (2, 4)))
+```
+
+Scripts can react to the world. The game calls these by name in any mod: `on_hour(ctx)`, `on_day(ctx, day)`, `on_season(ctx, season)`, `on_weather(ctx, id)`, `on_new_species(ctx, name)`, `on_extinct(ctx, name)`. A script can:
+- read the temperature, season, weather, time, colony position and creature counts;
+- read and set any particle;
+- use any god power, spawn creatures and change the weather.
+
+```rhai
+// assets/mods/example_events/scripts/events.rhai (shipped): storms throw lightning
+fn on_hour(ctx) {
+    if ctx.weather() == "core:storm" && ctx.rand() < 0.5 {
+        let p = near_colony(ctx, 60, 320);
+        ctx.power("core:lightning", p[0], p[1], 2);
+    }
+}
+```
+
 - Using an existing id replaces that definition.
-- `assets/mods/example_crystals` is a complete mod: a new material, item and glowing tree, a patch that adds the tree to forests, and a script that scatters crystal shards when one is felled.
+- The **data editor** (F2) shows any definition as text. **Apply** changes the running world; **Save to my mod** writes it into `assets/mods/user/` so it stays. Change the id to make something new.
+- `assets/mods/example_events` shows world events in script, and `assets/mods/example_crystals` is a complete mod: a new material, item and glowing tree, a patch that adds the tree to forests, and a script that scatters crystal shards when one is felled.
 - Rust mods implement `pw_game::PwPlugin` to add per-tick systems and new script functions (see `DayAnnouncer` in `src/main.rs`).
 
 ## Tests
@@ -153,10 +206,15 @@ The tests cover:
 - pathfinding
 - chopping, harvesting, mining, hauling and building a room
 - work priorities
-- fire, rain and wind
+- fire, rain and wind; lava, ice, flooding and smoke
 - roof support and collapse
 - seasons and weather
-- plant growth, scripts and save/load
+- every god power
+- animals eating, breeding, learning, hunting and evolving into new species
+- forests spreading
+- script world events
+- editing every definition as text, live content swaps and hot reload
+- plant growth and save/load
 
 Tools for testing:
 - **Busy-colony benchmark:** `cargo test --release -p pw_game --test game bench -- --ignored --nocapture` times a busy colony.
@@ -170,7 +228,7 @@ Tools for testing:
 
 ## Roadmap
 
-Next on the list: colonist needs (food, sleep, warmth), crafting, farming zones, flowing water, animals.
+Next on the list: colonist needs (food, sleep, warmth), hunting and taming, crafting, farming zones, tribes that settle and build on their own.
 
 ## License
 
