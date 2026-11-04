@@ -95,6 +95,8 @@ pub struct ObjectProto {
     pub blocks: bool,
     /// Roofs: max distance (tiles) to a support; 0 = none needed.
     pub needs_support: u32,
+    /// (object index, chance, radius tiles, interval ticks, max nearby).
+    pub spread: Option<(usize, f32, u32, u32, u32)>,
     /// True if the shape has solid particles tagged `support` (walls).
     pub gives_support: bool,
 }
@@ -601,10 +603,17 @@ impl Content {
                 blocks: false,
                 needs_support: d.needs_support,
                 gives_support: false,
+                spread: None,
             });
         }
-        // Growth targets need every object registered.
+        // Growth and spread targets need every object registered.
         for (i, d) in self.objects.iter() {
+            if let Some(s) = &d.spread {
+                match self.objects.idx(&s.object) {
+                    Some(n) => protos[i].spread = Some((n, s.chance, s.radius.max(1), s.interval.max(30), s.max_nearby)),
+                    None => errs.push(format!("object {}: unknown spread object '{}'", d.id, s.object)),
+                }
+            }
             if let Some(g) = &d.growth {
                 match self.objects.idx(&g.next) {
                     Some(n) => protos[i].growth = Some((n, g.ticks.max(1))),

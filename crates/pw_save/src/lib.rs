@@ -11,7 +11,7 @@ use pw_game::Game;
 use pw_world::*;
 use serde::{Deserialize, Serialize};
 
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct Tables {
@@ -34,6 +34,7 @@ struct SaveFile {
     objects: ObjectStore,
     colony: Colony,
     env: pw_game::Env,
+    life: pw_life::Life,
 }
 
 pub fn save(game: &Game, path: &Path) -> Result<usize, String> {
@@ -63,6 +64,7 @@ pub fn save(game: &Game, path: &Path) -> Result<usize, String> {
         objects: game.world.objects.clone(),
         colony: game.colony.clone(),
         env: game.env.clone(),
+        life: game.life.clone(),
     };
     let bytes = bincode::serialize(&file).map_err(|e| e.to_string())?;
     if let Some(dir) = path.parent() {
@@ -192,5 +194,17 @@ pub fn load(game: &mut Game, path: &Path) -> Result<Vec<String>, String> {
 
     game.replace_state(world, colony, file.seed, file.tick, file.rng);
     game.env = file.env;
+    // Wild creatures: find their def again by their species' creature id.
+    let mut life = file.life;
+    let defs: HashMap<u32, Option<usize>> = life.species.iter().map(|s| (s.id, c.creatures.idx(&s.def_id))).collect();
+    life.creatures.retain_mut(|cr| match defs.get(&cr.species).copied().flatten() {
+        Some(d) => {
+            cr.def = d;
+            cr.path.clear();
+            true
+        }
+        None => false,
+    });
+    game.life = life;
     Ok(warnings)
 }

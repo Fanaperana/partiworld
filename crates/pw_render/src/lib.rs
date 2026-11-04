@@ -45,13 +45,23 @@ pub struct SimClock {
     /// between ticks instead of jumping (the sim runs at a different rate
     /// than the screen).
     prev: HashMap<u32, (f32, f32)>,
+    prev_life: HashMap<u32, (f32, f32)>,
 }
 
 impl SimClock {
     /// Where to draw a colonist this frame: between its last two tick positions.
     pub fn draw_pos(&self, p: &pw_colony::Pawn) -> Vec2 {
-        let now = Vec2::new(p.pos.0, p.pos.1);
-        let Some(&(x, y)) = self.prev.get(&p.id) else { return now };
+        self.glide(self.prev.get(&p.id), p.pos)
+    }
+
+    /// Same for a wild creature.
+    pub fn draw_pos_life(&self, c: &pw_life::Creature) -> Vec2 {
+        self.glide(self.prev_life.get(&c.id), c.pos)
+    }
+
+    fn glide(&self, prev: Option<&(f32, f32)>, pos: (f32, f32)) -> Vec2 {
+        let now = Vec2::new(pos.0, pos.1);
+        let Some(&(x, y)) = prev else { return now };
         let before = Vec2::new(x, y);
         // A jump (step out of a wall, load) is not interpolated.
         if before.distance(now) > TILE as f32 * 2.0 || self.speed == 0 {
@@ -63,7 +73,7 @@ impl SimClock {
 
 impl Default for SimClock {
     fn default() -> Self {
-        Self { speed: 1, acc: 0.0, last_ticks: 0, prev: HashMap::new() }
+        Self { speed: 1, acc: 0.0, last_ticks: 0, prev: HashMap::new(), prev_life: HashMap::new() }
     }
 }
 
@@ -104,6 +114,8 @@ struct ItemSprite;
 struct BlueprintSprite;
 #[derive(Component)]
 struct ShadowSprite;
+#[derive(Component)]
+struct AnimalSprite;
 /// Full-view tints: sky light (night, dawn, dusk) and weather (cloud, fog).
 #[derive(Component)]
 struct NightTint;
@@ -122,6 +134,9 @@ struct Views {
     chunks: HashMap<ChunkPos, ChunkView>,
     pawns: HashMap<u32, (Entity, Entity, Entity)>,
     shadow_img: Option<Handle<Image>>,
+    /// Wild creature id -> (sprite entity, image key).
+    animals: HashMap<u32, (Entity, (usize, u8, u8))>,
+    animal_images: HashMap<(usize, u8, u8), Handle<Image>>,
     items: HashMap<u32, (Entity, usize, TilePos)>,
     blueprints: HashMap<u32, Entity>,
     item_images: HashMap<usize, Handle<Image>>,
@@ -144,7 +159,7 @@ impl Plugin for PwRenderPlugin {
             .add_systems(Startup, setup_camera)
             .add_systems(
                 Update,
-                (run_sim, update_view, sync_chunks, sync_items, sync_blueprints, sync_pawns, day_night, weather_fx, draw_flashes, draw_zones).chain(),
+                (run_sim, update_view, sync_chunks, sync_items, sync_blueprints, sync_pawns, sync_animals, day_night, weather_fx, draw_flashes, draw_zones).chain(),
             );
     }
 }
@@ -251,6 +266,7 @@ fn run_sim(time: Res<Time>, mut clock: ResMut<SimClock>, mut game: ResMut<GameRe
     let mut n = 0;
     while clock.acc >= 1.0 && n < 24 {
         clock.prev = game.0.colony.pawns.iter().map(|p| (p.id, p.pos)).collect();
+        clock.prev_life = game.0.life.creatures.iter().map(|c| (c.id, c.pos)).collect();
         game.0.step();
         clock.acc -= 1.0;
         n += 1;
@@ -690,6 +706,7 @@ fn check_content(views: &mut Views, content: &std::sync::Arc<Content>) {
         views.content_ptr = ptr;
         views.item_images.clear();
         views.bp_images.clear();
+        views.animal_images.clear();
     }
 }
 
@@ -836,6 +853,79 @@ fn sync_pawns(
                 };
                 let sh = commands.spawn((Sprite::from_image(shadow), shadow_pos, ShadowSprite)).id();
                 views.pawns.insert(p.id, (e, c, sh));
+            }
+        }
+    }
+}
+
+/// Rotate a colour's hue by `turn` (fraction of a full turn).
+fn hue_shift(c: [u8; 4], turn: f32) -> [u8; 4] {
+    let (r, g, b) = (c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0);
+    let a = turn * std::f32::consts::TAU;
+    let (s, co) = a.sin_cos();
+    // Rotation around the grey axis.
+    let k = (1.0 - co) / 3.0;
+    let q = (1.0f32 / 3.0).sqrt() * s;
+    let m = [[co + k, k - q, k + q], [k + q, co + k, k - q], [k - q, k + q, co + k]];
+    let f = |row: [f32; 3]| ((row[0] * r + row[1] * g + row[2] * b).clamp(0.0, 1.0) * 255.0) as u8;
+    [f(m[0]), f(m[1]), f(m[2]), c[3]]
+}
+
+/// Wild animals: colour drifts with their colour gene, size with their size gene.
+fn sync_animals(
+    mut commands: Commands,
+    game: Res<GameRes>,
+    mut views: ResMut<Views>,
+    mut images: ResMut<Assets<Image>>,
+    mut q: Query<&mut Transform, With<AnimalSprite>>,
+    clock: Res<SimClock>,
+) {
+    let g = &game.0;
+    let live: HashSet<u32> = g.life.creatures.iter().map(|c| c.id).collect();
+    let gone: Vec<u32> = views.animals.keys().filter(|k| !live.contains(k)).copied().collect();
+    for id in gone {
+        let (e, _) = views.animals.remove(&id).unwrap();
+        commands.entity(e).despawn();
+    }
+    for c in &g.life.creatures {
+        let def = g.content.creatures.by_idx(c.def);
+        let n_slots = def.slots.values().map(|v| v.len()).max().unwrap_or(1).max(1);
+        let pick = (c.species as usize * 7 + c.id as usize) % n_slots;
+        // 12 hue steps of colour drift.
+        let hue = ((c.genes[pw_life::G_HUE] - 1.0) * 6.0).round().clamp(-6.0, 6.0) as i8;
+        let key = (c.def, pick as u8, (hue + 6) as u8);
+        let at = clock.draw_pos_life(c);
+        let scale = (c.genes[pw_life::G_SIZE] * if c.age < 2 * pw_game::DAY_TICKS { 0.75 } else { 1.0 }).clamp(0.5, 2.0);
+        let t = Transform::from_xyz(at.x, at.y, 9.5).with_scale(Vec3::splat(scale));
+        match views.animals.get(&c.id) {
+            Some(&(e, k)) if k == key => {
+                if let Ok(mut tr) = q.get_mut(e) {
+                    *tr = t;
+                }
+            }
+            other => {
+                if let Some(&(e, _)) = other {
+                    commands.entity(e).despawn();
+                }
+                let img = match views.animal_images.get(&key) {
+                    Some(h) => h.clone(),
+                    None => {
+                        let slots: std::collections::BTreeMap<String, String> = def
+                            .slots
+                            .iter()
+                            .map(|(k, v)| {
+                                let base = v.get(pick % v.len().max(1)).and_then(|h| parse_color(h)).unwrap_or([200, 0, 200, 255]);
+                                let c = hue_shift(base, hue as f32 / 24.0);
+                                (k.clone(), format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]))
+                            })
+                            .collect();
+                        let h = sprite_image(&mut images, &g.content.creature_rt[c.def].sprite, &slots, true);
+                        views.animal_images.insert(key, h.clone());
+                        h
+                    }
+                };
+                let e = commands.spawn((Sprite::from_image(img), t, AnimalSprite)).id();
+                views.animals.insert(c.id, (e, key));
             }
         }
     }

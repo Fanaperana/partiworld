@@ -8,6 +8,7 @@ license.workspace = true
 pw_core.workspace = true
 pw_mods.workspace = true
 pw_game.workspace = true
+pw_life.workspace = true
 pw_save.workspace = true
 pw_render.workspace = true
 bevy.workspace = true

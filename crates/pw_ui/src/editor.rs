@@ -200,6 +200,7 @@ impl Editor {
             regrow: None,
             hooks: BTreeMap::new(),
             needs_support,
+            spread: None,
         })
     }
 

@@ -264,6 +264,9 @@ pub struct ObjectDef {
     /// Rhai hooks: `on_destroyed`, `on_built`, `on_harvested`, `on_grown`.
     #[serde(default)]
     pub hooks: BTreeMap<String, String>,
+    /// Plants that seed new plants nearby.
+    #[serde(default)]
+    pub spread: Option<SpreadDef>,
     /// Roofs: must be within this many tiles of a support (a wall or rock,
     /// i.e. solid particles tagged `support`), or it can't be built and it
     /// collapses. 0 = needs no support.
@@ -432,6 +435,114 @@ pub struct CreatureDef {
     /// Colours for `$slot` palette entries, one is picked per creature.
     #[serde(default)]
     pub slots: BTreeMap<String, Vec<String>>,
+    /// Wild life: present for animals that live, eat, breed, learn and evolve
+    /// on their own. Colonists leave this out.
+    #[serde(default)]
+    pub life: Option<LifeDef>,
+}
+
+/// How a wild creature lives. Genes start at 1.0 (the species average) and
+/// drift through mutation; `brain` weights are learned and passed on.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LifeDef {
+    /// Tags other creatures use to recognise this one (prey, predator...).
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// What it eats.
+    pub diet: Vec<FoodDef>,
+    /// Creatures with these tags are feared and fled from.
+    #[serde(default)]
+    pub flees: Vec<String>,
+    /// Body size (1 = colonist-sized). Bigger needs more food, wins fights.
+    #[serde(default = "one")]
+    pub size: f32,
+    /// Sight in tiles.
+    #[serde(default = "default_sight")]
+    pub sight: f32,
+    /// Energy used per in-game hour, as a fraction of a full stomach.
+    #[serde(default = "default_hunger")]
+    pub hunger: f32,
+    /// Lifespan and adulthood, in in-game days.
+    pub lifespan_days: f32,
+    #[serde(default = "default_adult")]
+    pub adult_days: f32,
+    /// Young per birth (min, max) and hours between births.
+    #[serde(default = "default_litter")]
+    pub litter: (u32, u32),
+    #[serde(default = "default_breed_hours")]
+    pub breed_every_hours: f32,
+    /// Needs a partner of the same species nearby to breed.
+    #[serde(default = "yes")]
+    pub needs_mate: bool,
+    /// 0..1 how much it wants to stay near its own kind (herds, packs).
+    #[serde(default)]
+    pub herd: f32,
+    /// Below this outdoor temperature (C) it starts freezing; genes shift it.
+    #[serde(default)]
+    pub cold_limit: f32,
+    /// How strongly genes change from parent to child (0.05 = gently).
+    #[serde(default = "default_mutation")]
+    pub mutation: f32,
+    /// Most of this species alive at once (keeps the simulation fast).
+    #[serde(default = "default_max_pop")]
+    pub max_population: u32,
+    /// Wanders back in from the wilds if the local population dies out.
+    #[serde(default)]
+    pub migrates: bool,
+    /// Items left behind when it dies (not when burnt).
+    #[serde(default)]
+    pub remains: Vec<(String, u32)>,
+}
+
+fn default_sight() -> f32 {
+    10.0
+}
+fn default_hunger() -> f32 {
+    0.03
+}
+fn default_adult() -> f32 {
+    2.0
+}
+fn default_litter() -> (u32, u32) {
+    (1, 2)
+}
+fn default_breed_hours() -> f32 {
+    24.0
+}
+fn default_mutation() -> f32 {
+    0.06
+}
+fn default_max_pop() -> u32 {
+    120
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum FoodDef {
+    /// Eat floor particles (`matches`: id, `tag:x`) and leave `leaves` behind.
+    Graze { matches: String, leaves: String, energy: f32 },
+    /// Eat from objects with these tags: their yield (berries) first, then leaves.
+    Browse { tags: Vec<String>, energy: f32 },
+    /// Hunt creatures with these tags; gains this share of the prey's energy.
+    Hunt { tags: Vec<String>, energy: f32 },
+}
+
+/// Plants that spread: a grown plant drops this object nearby now and then.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SpreadDef {
+    pub object: String,
+    /// Chance per check (scaled by the season's growth).
+    pub chance: f32,
+    /// How far, in tiles.
+    pub radius: u32,
+    /// Ticks between checks.
+    pub interval: u32,
+    /// Skip if this many objects already stand within the radius (no overcrowding).
+    #[serde(default = "default_crowd")]
+    pub max_nearby: u32,
+}
+
+fn default_crowd() -> u32 {
+    6
 }
 
 /// Seasons, day length, temperature and weather. Lives in a mod's `climate.ron`.

@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use pw_colony::{Colony, ColonyEvent, nearest_tile};
+use pw_life::{Life, LifeEnv, LifeEvent};
 use pw_core::*;
 use pw_mods::ScriptHost;
 use pw_objects::{self as objs, ObjectEvent};
@@ -68,6 +69,8 @@ pub struct Game {
     pub mods_dir: PathBuf,
     /// Weather, temperature, snow.
     pub env: Env,
+    /// Wild animals: their genes, brains and species.
+    pub life: Life,
     /// Why the last `build` call skipped tiles, for the UI.
     pub last_build_error: Option<String>,
     /// Recent flashes (x, y, radius, tick) for the renderer: lightning, meteors.
@@ -97,6 +100,7 @@ impl Game {
             log: VecDeque::new(),
             mods_dir,
             env: Env::default(),
+            life: Life::default(),
             last_build_error: None,
             flashes: Vec::new(),
             pool: GenPool::new(threads),
@@ -157,6 +161,11 @@ impl Game {
                 self.colony.items.add(&self.world, &self.content, i, n, spawn.offset(0, -2));
             }
         }
+        // Wild life around the landing site: rabbit warrens, a deer herd, and a wolf pack further out.
+        let groups = [("core:rabbit", 5, (8, 6)), ("core:rabbit", 5, (-9, 7)), ("core:deer", 5, (10, -9)), ("core:wolf", 3, (-18, -16))];
+        for (id, n, (dx, dy)) in groups {
+            self.spawn_group(id, spawn.offset(dx, dy), n);
+        }
         self.message(format!("Your colonists land. Seed {}.", self.seed));
     }
 
@@ -186,6 +195,18 @@ impl Game {
         let sim_env = SimEnv { wet: self.env.wetness.max(self.env.precip * 0.8), wind: self.env.wind_vec(), temp: self.env.temp };
         pw_sim::tick(&mut self.world, &content, &mut self.rng, &self.sim, &sim_env);
         let mut obj_events = objs::process_damage(&mut self.world, &content);
+        let life_env = LifeEnv {
+            tick: self.tick,
+            day_ticks: DAY_TICKS,
+            temp: self.env.temp,
+            dark: self.light().dark,
+            walk: self.env.walk_speed(),
+        };
+        let life_events = self.life.tick(&mut self.world, &content, &mut self.rng, &life_env);
+        self.handle_life(life_events);
+        if self.tick % DAY_TICKS == DAY_TICKS / 2 {
+            self.migrate();
+        }
         let growth = self.env.growth(&content.climate, self.tick);
         obj_events.extend(objs::tick_life(&mut self.world, &content, self.tick, &mut self.rng, growth));
         if self.tick % 30 == 0 {
@@ -502,14 +523,74 @@ impl Game {
         (cx + (a.cos() * d) as i32, cy + (a.sin() * d) as i32)
     }
 
-    /// Spawn any creature by id (colonists join the colony).
+    /// Spawn any creature by id: wild animals join the wild, colonists the colony.
     pub fn spawn_creature(&mut self, id: &str, t: TilePos) -> bool {
         let Some(c) = self.content.creatures.idx(id) else { return false };
-        if !self.world.walkable(t) {
-            return false;
+        let Some(t) = nearest_tile(t, 3, |t| self.world.walkable(t)) else { return false };
+        if self.content.creatures.by_idx(c).life.is_some() {
+            let content = self.content.clone();
+            return self.life.spawn(&content, c, t, &mut self.rng, self.tick, DAY_TICKS).is_some();
         }
         self.colony.spawn_pawn(&self.content, c, t, &mut self.rng);
         true
+    }
+
+    /// Spawn a few creatures around a tile.
+    pub fn spawn_group(&mut self, id: &str, at: TilePos, n: u32) -> u32 {
+        let mut made = 0;
+        for _ in 0..n * 3 {
+            if made >= n {
+                break;
+            }
+            let t = at.offset(self.rng.range_i32(-3, 3), self.rng.range_i32(-3, 3));
+            if self.spawn_creature(id, t) {
+                made += 1;
+            }
+        }
+        made
+    }
+
+    fn handle_life(&mut self, events: Vec<LifeEvent>) {
+        let content = self.content.clone();
+        for e in events {
+            match e {
+                LifeEvent::Died { def, pos, cause, .. } => {
+                    if cause == pw_life::Death::Burnt {
+                        continue;
+                    }
+                    if let Some(life) = &content.creatures.by_idx(def).life {
+                        let t = tile_of_f(pos.0, pos.1);
+                        for (item, n) in &life.remains {
+                            if let Some(i) = content.items.idx(item) {
+                                self.colony.items.add(&self.world, &content, i, *n, t);
+                            }
+                        }
+                    }
+                }
+                LifeEvent::NewSpecies { name, from, .. } => {
+                    self.message(format!("A new species has appeared: {name}, evolved from {from}."));
+                }
+                LifeEvent::Extinct { name } => self.message(format!("The {name} have died out here.")),
+            }
+        }
+    }
+
+    /// Animals that died out locally wander back in from the wilds.
+    fn migrate(&mut self) {
+        let content = self.content.clone();
+        let Some(home) = self.colony.pawns.first().map(|p| p.tile()) else { return };
+        for (i, d) in content.creatures.iter() {
+            let Some(life) = &d.life else { continue };
+            if !life.migrates || self.life.count_def(i) >= 3 {
+                continue;
+            }
+            let a = self.rng.f32() * std::f32::consts::TAU;
+            let r = 30.0;
+            let at = home.offset((a.cos() * r) as i32, (a.sin() * r) as i32);
+            if self.spawn_group(&d.id, at, 3) > 0 {
+                self.message(format!("{} wander in from the wilds.", d.name));
+            }
+        }
     }
 
     /// God tool: start a fire.
@@ -571,6 +652,12 @@ impl Game {
                     ));
                 }
             }
+        }
+        if let Some(c) = self.life.at((px as f32, py as f32), 6.0) {
+            let sp = self.life.species_of(c.species).map(|s| s.name.clone()).unwrap_or_default();
+            let days = c.age as f32 / DAY_TICKS as f32;
+            out.push(format!("{sp}, {days:.1} days old, generation {}", c.generation));
+            out.push(format!("{} - energy {:.0}", c.activity(), c.energy));
         }
         if let Some(info) = self.world.tile(t) {
             out.push(if info.walkable { format!("Walkable, cost {:.1}", info.cost) } else { "Blocked".into() });

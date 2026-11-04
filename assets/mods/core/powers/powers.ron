@@ -79,4 +79,17 @@
             Paint(layer: Overlay, set: "none", onto: Some("core:fire")),
             Paint(layer: Floor, set: "core:basalt", onto: Some("tag:lava")),
         ]),
+
+    PowerDef(id: "core:spawn_rabbits", name: "Rabbits", category: "Life", radius: 6,
+        description: "Release a few rabbits. They graze, breed fast and evolve.",
+        effects: [Spawn(creature: "core:rabbit", count: 4)]),
+    PowerDef(id: "core:spawn_deer", name: "Deer", category: "Life", radius: 6,
+        description: "Release a small herd of deer.",
+        effects: [Spawn(creature: "core:deer", count: 3)]),
+    PowerDef(id: "core:spawn_wolves", name: "Wolves", category: "Life", radius: 6,
+        description: "Release a wolf pack. They hunt rabbits and deer.",
+        effects: [Spawn(creature: "core:wolf", count: 2)]),
+    PowerDef(id: "core:spawn_colonist", name: "Colonist", category: "Life", radius: 2,
+        description: "A new colonist joins you.",
+        effects: [Spawn(creature: "core:colonist", count: 1)]),
 ]

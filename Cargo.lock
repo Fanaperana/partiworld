@@ -4903,12 +4903,24 @@ version = "0.1.0"
 dependencies = [
  "pw_colony",
  "pw_core",
+ "pw_life",
  "pw_mods",
  "pw_objects",
  "pw_sim",
  "pw_world",
  "pw_worldgen",
  "rhai",
+ "serde",
+]
+
+[[package]]
+name = "pw_life"
+version = "0.1.0"
+dependencies = [
+ "pw_colony",
+ "pw_core",
+ "pw_objects",
+ "pw_world",
  "serde",
 ]
 
@@ -4941,6 +4953,7 @@ dependencies = [
  "pw_colony",
  "pw_core",
  "pw_game",
+ "pw_life",
  "pw_world",
 ]
 
@@ -4953,6 +4966,7 @@ dependencies = [
  "pw_colony",
  "pw_core",
  "pw_game",
+ "pw_life",
  "pw_mods",
  "pw_world",
  "serde",
@@ -4975,6 +4989,7 @@ dependencies = [
  "bevy_egui",
  "pw_core",
  "pw_game",
+ "pw_life",
  "pw_mods",
  "pw_render",
  "pw_save",

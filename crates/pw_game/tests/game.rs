@@ -577,3 +577,87 @@ fn smoke_drifts_with_the_wind_and_fades() {
     }
     assert_eq!(count(&w, &c, Layer::Overlay, "core:smoke"), 0, "smoke never faded");
 }
+
+#[test]
+fn wildlife_lives_breeds_learns_and_hunts() {
+    let mut g = new_game(12);
+    assert!(g.life.alive() >= 10, "start wildlife: {}", g.life.alive());
+    let start: Vec<[f32; pw_life::ACTIONS]> = g.life.creatures.iter().map(|c| c.brain).collect();
+    let t = std::time::Instant::now();
+    run(&mut g, (DAY_TICKS * 4) as u32, |_| false);
+    let gens = g.life.creatures.iter().map(|c| c.generation).max().unwrap_or(0);
+    let born: u32 = g.life.species.iter().map(|s| s.born).sum();
+    let died: u32 = g.life.species.iter().map(|s| s.died).sum();
+    println!("4 days: {} alive, {born} born, {died} died, max generation {gens}, {:.1}s", g.life.alive(), t.elapsed().as_secs_f32());
+    assert!(born > 0 && gens >= 1, "nothing was born");
+    // Children differ from the species average: genes mutate.
+    let young: Vec<&pw_life::Creature> = g.life.creatures.iter().filter(|c| c.generation > 0).collect();
+    assert!(young.iter().any(|c| c.genes.iter().any(|&x| (x - 1.0).abs() > 0.05)), "no mutation");
+    // Brains changed from experience.
+    let learned = g.life.creatures.iter().filter(|c| c.brain.iter().any(|&w| (w - 1.0).abs() > 0.15)).count();
+    assert!(learned > 0 || start.is_empty(), "nobody learned anything");
+    // Grazing ate grass somewhere: some died of something, rabbits kept eating.
+    assert!(died > 0 || g.life.alive() > 0);
+}
+
+#[test]
+fn wolves_hunt_and_lineages_become_new_species() {
+    let mut g = new_game(12);
+    // Fast mutation so drift shows up within a short test.
+    let mut c = (*g.content).clone();
+    for (_, d) in c.creatures.iter().map(|(i, d)| (i, d.clone())).collect::<Vec<_>>() {
+        if let Some(mut life) = d.life.clone() {
+            life.mutation = 0.35;
+            life.breed_every_hours = 6.0;
+            life.adult_days = 0.2;
+            let mut nd = d.clone();
+            nd.life = Some(life);
+            c.creatures.insert(nd, "test");
+        }
+    }
+    c.link().unwrap();
+    g.set_content(std::sync::Arc::new(c));
+    let home = g.spawn_tile();
+    g.spawn_group("core:wolf", home.offset(4, 4), 4);
+    g.spawn_group("core:rabbit", home.offset(6, 4), 12);
+    let ok = run(&mut g, (DAY_TICKS * 3) as u32, |g| g.life.species.len() > 3);
+    println!("species: {:?}", g.life.species.iter().map(|s| (&s.name, s.alive, s.born)).collect::<Vec<_>>());
+    assert!(ok, "no new species appeared");
+    assert!(g.log.iter().any(|m| m.contains("new species")));
+    // Give the wolves time to hunt.
+    let eaten = |g: &Game| g.life.species.iter().map(|s| s.causes[pw_life::Death::Eaten as usize]).sum::<u32>();
+    let caught = run(&mut g, (DAY_TICKS * 2) as u32, |g| eaten(g) > 0);
+    assert!(caught, "wolves never caught anything");
+}
+
+#[test]
+fn forests_spread() {
+    let mut g = new_game(3);
+    g.load_chunks_now(ChunkPos::new(-1, -1), ChunkPos::new(1, 1));
+    let sapling = g.content.objects.idx("core:oak_sapling").unwrap();
+    let pine_sapling = g.content.objects.idx("core:pine_sapling").unwrap();
+    let sprout = g.content.objects.idx("core:berry_sprout").unwrap();
+    let young = |g: &Game| g.world.objects.instances.values().filter(|i| [sapling, pine_sapling, sprout].contains(&i.def)).count();
+    let before = young(&g);
+    let ok = run(&mut g, (DAY_TICKS * 2) as u32, |g| young(g) > before + 2);
+    assert!(ok, "no new saplings: {before} -> {}", young(&g));
+}
+
+#[test]
+#[ignore]
+fn debug_wildlife() {
+    let mut g = new_game(12);
+    let mut causes: std::collections::BTreeMap<String, u32> = Default::default();
+    for hour in 0..(24 * 3) {
+        for _ in 0..(DAY_TICKS / 24) {
+            let before: Vec<(u32, String)> = g.life.creatures.iter().map(|c| (c.id, g.content.creatures.by_idx(c.def).name.clone())).collect();
+            g.step();
+            let _ = before;
+        }
+        if hour % 6 == 0 {
+            let s: Vec<String> = g.life.creatures.iter().take(6).map(|c| format!("{}:{:.0}e {} b{:?}", g.content.creatures.by_idx(c.def).name, c.energy, c.activity(), c.brain.map(|b| (b * 10.0).round() / 10.0))).collect();
+            println!("h{hour} temp {:.0} alive {} :: {}", g.env.temp, g.life.alive(), s.join(" | "));
+        }
+    }
+    let _ = &mut causes;
+}

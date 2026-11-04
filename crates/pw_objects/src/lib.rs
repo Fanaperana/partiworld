@@ -245,6 +245,37 @@ pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng,
                 continue;
             }
         }
+        // Grown plants drop seedlings nearby, unless it's crowded.
+        if let Some((seedling, chance, radius, interval, max_nearby)) = proto.spread {
+            if !inst_built(world, id) && rng.chance(chance * growth.min(1.5) * EVERY as f32 / interval as f32) {
+                let home = tile_of(origin.0, origin.1);
+                let r = radius as i32;
+                let area = TileRect::from_corners(home.offset(-r, -r), home.offset(r, r));
+                // Crowded only by its own kind (and its young).
+                let grown = content.protos[seedling].growth.map(|g| g.0);
+                let kin = world
+                    .objects_in_rect(area)
+                    .into_iter()
+                    .filter(|o| world.objects.get(*o).is_some_and(|i| i.def == def || i.def == seedling || Some(i.def) == grown))
+                    .count();
+                if kin < max_nearby as usize + 1 {
+                    let t = home.offset(rng.range_i32(-r, r), rng.range_i32(-r, r));
+                    let sp = &content.protos[seedling];
+                    let o = match sp.anchor {
+                        Anchor::Tile => t.origin(),
+                        Anchor::Center => {
+                            let (x, y) = t.center();
+                            (x as i32, y as i32)
+                        }
+                    };
+                    let seed = rng.next_u64();
+                    let soil = World::tile_cells(t).all(|(x, y)| world.get(x, y, Layer::Solid) == NONE_MAT && content.mat_rt(world.get(x, y, Layer::Floor)).has_tag("soil"));
+                    if soil && world.objects_in_rect(TileRect::from_corners(t, t)).is_empty() && can_place(world, content, seedling, o, seed) {
+                        place(world, content, seedling, o, seed, false);
+                    }
+                }
+            }
+        }
         if let Some(rg) = &proto.regrow {
             if (tick / EVERY) % (rg.interval as u64 / EVERY).max(1) == 0 {
                 let cells = proto.cells(seed);
@@ -257,6 +288,10 @@ pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng,
         }
     }
     out
+}
+
+fn inst_built(world: &World, id: ObjId) -> bool {
+    world.objects.get(id).is_some_and(|i| i.built)
 }
 
 /// Remove without marking natural keys destroyed-by-player (used for growth).

@@ -11,6 +11,8 @@
         break_fraction: 0.35,
         drops: [DropDef(item: "core:wood", min: 8, max: 14)],
         hooks: {"on_destroyed": "tree_fall"},
+        // Forests grow: grown oaks drop saplings nearby when there's room.
+        spread: SpreadDef(object: "core:oak_sapling", chance: 0.6, radius: 6, interval: 5400, max_nearby: 5),
     ),
     ObjectDef(
         id: "core:pine_tree",
@@ -24,6 +26,7 @@
         break_fraction: 0.35,
         drops: [DropDef(item: "core:wood", min: 6, max: 10)],
         hooks: {"on_destroyed": "tree_fall"},
+        spread: SpreadDef(object: "core:pine_sapling", chance: 0.5, radius: 6, interval: 5400, max_nearby: 5),
     ),
     ObjectDef(
         id: "core:berry_bush",
@@ -36,6 +39,7 @@
         break_fraction: 0.5,
         drops: [DropDef(item: "core:wood", min: 0, max: 1)],
         regrow: RegrowDef(materials: ["core:berries"], interval: 1800, chance: 0.35),
+        spread: SpreadDef(object: "core:berry_sprout", chance: 0.5, radius: 5, interval: 5400, max_nearby: 6),
     ),
     ObjectDef(
         id: "core:shrub",
@@ -77,6 +81,17 @@
         ]),
         break_fraction: 0.5,
         growth: GrowthDef(next: "core:oak_tree", ticks: 3600),
+    ),
+    ObjectDef(
+        id: "core:pine_sapling",
+        name: "Pine sapling",
+        tags: ["plant", "tree", "flammable"],
+        shape: Procedural([
+            Circle(layer: Solid, material: "core:sapling_wood", radius: (1.0, 1.4)),
+            Circle(layer: Overlay, material: "core:pine_needles", radius: (2.5, 3.5), density: 0.85),
+        ]),
+        break_fraction: 0.5,
+        growth: GrowthDef(next: "core:pine_tree", ticks: 4200),
     ),
     ObjectDef(
         id: "core:berry_sprout",

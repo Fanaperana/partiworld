@@ -4,4 +4,6 @@
     ItemDef(id: "core:iron", name: "Iron ore", color: "#a06f58", tags: ["material"]),
     ItemDef(id: "core:gold", name: "Gold", color: "#e0b83a", tags: ["material", "valuable"]),
     ItemDef(id: "core:berries", name: "Berries", color: "#b82a46", tags: ["food"]),
+    ItemDef(id: "core:meat", name: "Meat", color: "#a83c34", tags: ["food"]),
+    ItemDef(id: "core:hide", name: "Hide", color: "#8c6a48", tags: ["material"]),
 ]

@@ -52,6 +52,7 @@ pub struct UiState {
     pub show_editor: bool,
     pub show_help: bool,
     pub show_work: bool,
+    pub show_life: bool,
     /// Selected colonist (pawn id) and whether the camera follows it.
     pub selected: Option<u32>,
     pub follow: bool,
@@ -80,6 +81,7 @@ impl Default for UiState {
             show_editor: false,
             show_help: true,
             show_work: false,
+            show_life: false,
             selected: None,
             follow: false,
             last_build: "core:wall_wood".into(),
@@ -219,6 +221,9 @@ fn camera_keys(
     }
     if keys.just_pressed(KeyCode::KeyP) {
         ui.show_work = !ui.show_work;
+    }
+    if keys.just_pressed(KeyCode::KeyL) {
+        ui.show_life = !ui.show_life;
     }
     if keys.just_pressed(KeyCode::F5) {
         quick_save(&game.0, &mut ui);
@@ -477,6 +482,74 @@ fn tool_button(ui: &mut egui::Ui, state: &mut UiState, tool: Tool, label: &str) 
     if ui.selectable_label(state.tool == tool, text).clicked() {
         state.tool = tool;
     }
+}
+
+/// Every species that has lived here: how it's doing and how it has changed.
+fn life_window(ui: &mut egui::Ui, g: &Game) {
+    let life = &g.life;
+    ui.label(egui::RichText::new(format!(
+        "{} wild animals. Genes start at 1.00 and drift with every generation; new species split off when a lineage drifts far enough.",
+        life.alive()
+    ))
+    .weak());
+    let mut avg: std::collections::HashMap<u32, ([f32; pw_life::GENES], u32)> = Default::default();
+    for c in &life.creatures {
+        let e = avg.entry(c.species).or_insert(([0.0; pw_life::GENES], 0));
+        for k in 0..pw_life::GENES {
+            e.0[k] += c.genes[k];
+        }
+        e.1 += 1;
+    }
+    let mut list: Vec<&pw_life::Species> = life.species.iter().collect();
+    list.sort_by_key(|s| (s.extinct_tick.is_some(), std::cmp::Reverse(s.alive)));
+    egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+        egui::Grid::new("life_grid").striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
+            for h in ["Species", "Alive", "Trend", "Born", "Died (eaten / starved / old / burnt / froze)", "Gen", "Speed", "Size", "Cold", "Fertile"] {
+                ui.label(egui::RichText::new(h).small().strong());
+            }
+            ui.end_row();
+            for s in list {
+                let name = match s.parent.and_then(|p| life.species_of(p)) {
+                    Some(p) => format!("{}  ← {}", s.name, p.name),
+                    None => s.name.clone(),
+                };
+                let text = egui::RichText::new(name);
+                ui.label(if s.extinct_tick.is_some() { text.weak().strikethrough() } else { text });
+                ui.label(s.alive.to_string());
+                // Population over the last hours.
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(90.0, 18.0), egui::Sense::hover());
+                let max = s.history.iter().copied().max().unwrap_or(1).max(1) as f32;
+                let n = s.history.len().max(2) as f32;
+                let pts: Vec<egui::Pos2> = s
+                    .history
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| egui::pos2(rect.left() + rect.width() * i as f32 / (n - 1.0), rect.bottom() - rect.height() * v as f32 / max))
+                    .collect();
+                if pts.len() > 1 {
+                    ui.painter().add(egui::Shape::line(pts, egui::Stroke::new(1.5, egui::Color32::from_rgb(120, 200, 140))));
+                }
+                ui.label(s.born.to_string());
+                let c = s.causes;
+                ui.label(format!("{}  ({} / {} / {} / {} / {})", s.died, c[2], c[0], c[1], c[3], c[4]));
+                ui.label(s.max_generation.to_string());
+                match avg.get(&s.id) {
+                    Some((sum, n)) => {
+                        let n = *n as f32;
+                        for k in [pw_life::G_SPEED, pw_life::G_SIZE, pw_life::G_COLD, pw_life::G_FERTILITY] {
+                            ui.label(format!("{:.2}", sum[k] / n));
+                        }
+                    }
+                    None => {
+                        for _ in 0..4 {
+                            ui.label("-");
+                        }
+                    }
+                }
+                ui.end_row();
+            }
+        });
+    });
 }
 
 /// Colonists x jobs. Click a cell to cycle 1 (first) .. 4 (last) .. off.
@@ -741,6 +814,9 @@ fn ui_panels(
                 if ui.small_button("Work priorities (P)").clicked() {
                     st.show_work = !st.show_work;
                 }
+                if ui.small_button("Life (L)").clicked() {
+                    st.show_life = !st.show_life;
+                }
             });
             let mut focus = None;
             for p in &g.colony.pawns {
@@ -815,6 +891,24 @@ fn ui_panels(
             if let Some(p) = pawn_at(g, cur, 6.0).and_then(|id| g.colony.pawns.iter().find(|p| p.id == id)) {
                 lines.push(format!("{} - {}", p.name, p.activity()));
             }
+            if let Some(c) = g.life.at((cur.x, cur.y), 6.0) {
+                let sp = g.life.species_of(c.species).map(|s| s.name.clone()).unwrap_or_default();
+                lines.push(format!("{sp} - {}", c.activity()));
+                lines.push(format!(
+                    "{:.1} days old, generation {}, {} young, {} kills",
+                    c.age as f32 / pw_game::DAY_TICKS as f32,
+                    c.generation,
+                    c.children,
+                    c.kills
+                ));
+                // Its most unusual genes, and what it has learned to favour.
+                let mut genes: Vec<(usize, f32)> = (0..pw_life::GENES).map(|k| (k, c.genes[k])).collect();
+                genes.sort_by(|a, b| (b.1 - 1.0).abs().total_cmp(&(a.1 - 1.0).abs()));
+                let gtxt: Vec<String> = genes.iter().take(3).map(|(k, v)| format!("{} {:.2}", pw_life::GENE_NAMES[*k], v)).collect();
+                lines.push(format!("Genes: {}", gtxt.join(", ")));
+                let (best, _) = c.brain.iter().enumerate().fold((0, f32::MIN), |b, (i, &w)| if w > b.1 { (i, w) } else { b });
+                lines.push(format!("Has learned to favour: {}", pw_life::ACTION_NAMES[best].to_lowercase()));
+            }
             // First describe line is the coordinates; skip it.
             lines.extend(g.describe(cur.x.floor() as i32, cur.y.floor() as i32).into_iter().skip(1).take(3));
             if !lines.is_empty() {
@@ -846,10 +940,16 @@ fn ui_panels(
             ui.label("  Plant: saplings and sprouts grow into trees and bushes.");
             ui.label("  God powers: paint any material, drop objects, start fires.");
             ui.label("Keys: C chop, M mine, G harvest, X cancel, Z stockpile, B build, T plant.");
-            ui.label("Click a colonist to select; F follows them. P: work priorities.");
+            ui.label("Click a colonist to select; F follows them. P: work priorities. L: wild life and evolution.");
             ui.label("Right click or Esc: back to Inspect. R: hide canopies and roofs. V: see-through roofs.");
             ui.label("F5 save, F9 load. Object editor: paint your own trees, houses and props.");
         });
+    }
+
+    if st.show_life {
+        let mut open = true;
+        egui::Window::new("Life").open(&mut open).default_pos([260.0, 140.0]).show(&ctx, |ui| life_window(ui, g));
+        st.show_life = open;
     }
 
     if st.show_work {

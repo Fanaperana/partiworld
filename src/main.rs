@@ -127,6 +127,7 @@ fn autoshot(
             }
         }
         ui.selected = g.colony.pawns.first().map(|p| p.id);
+        ui.show_life = std::env::var("PW_AUTOSHOT_LIFE").is_ok();
         // Optional: show off god powers (meteor, lava, water, dig).
         if std::env::var("PW_AUTOSHOT_POWERS").is_ok() {
             let at = |dx: i32, dy: i32| {
