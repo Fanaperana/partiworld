@@ -41,6 +41,9 @@ pub struct MaterialRt {
     /// Tags `roof` and `water`, used for snow and ice.
     pub roof: bool,
     pub water: bool,
+    /// C this material adds near it (`MaterialDef::heat`), and whether it burns to stand on.
+    pub heat: f32,
+    pub hot: bool,
 }
 
 impl MaterialRt {
@@ -59,10 +62,35 @@ pub struct StampCell {
 
 #[derive(Clone, Debug)]
 enum PrimRt {
-    Circle { layer: Layer, mat: MatId, r: (f32, f32), off: (f32, f32), density: f32 },
-    Blob { layer: Layer, mat: MatId, r: (f32, f32), off: (f32, f32), rough: f32, density: f32 },
-    Rect { layer: Layer, mat: MatId, size: (i32, i32), off: (f32, f32), density: f32 },
-    Scatter { layer: Layer, mat: MatId, r: f32, count: (u32, u32), off: (f32, f32) },
+    Circle {
+        layer: Layer,
+        mat: MatId,
+        r: (f32, f32),
+        off: (f32, f32),
+        density: f32,
+    },
+    Blob {
+        layer: Layer,
+        mat: MatId,
+        r: (f32, f32),
+        off: (f32, f32),
+        rough: f32,
+        density: f32,
+    },
+    Rect {
+        layer: Layer,
+        mat: MatId,
+        size: (i32, i32),
+        off: (f32, f32),
+        density: f32,
+    },
+    Scatter {
+        layer: Layer,
+        mat: MatId,
+        r: f32,
+        count: (u32, u32),
+        off: (f32, f32),
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -117,7 +145,13 @@ impl ObjectProto {
         let mut map: BTreeMap<(u8, i32, i32), MatId> = BTreeMap::new();
         for p in &self.prims {
             match *p {
-                PrimRt::Circle { layer, mat, r, off, density } => {
+                PrimRt::Circle {
+                    layer,
+                    mat,
+                    r,
+                    off,
+                    density,
+                } => {
                     let rad = rng.range_f32(r.0, r.1);
                     disc(rad, off, |dx, dy, _| {
                         if rng.f32() < density {
@@ -125,16 +159,25 @@ impl ObjectProto {
                         }
                     });
                 }
-                PrimRt::Blob { layer, mat, r, off, rough, density } => {
+                PrimRt::Blob {
+                    layer,
+                    mat,
+                    r,
+                    off,
+                    rough,
+                    density,
+                } => {
                     let rad = rng.range_f32(r.0, r.1);
-                    let phases: Vec<f32> = (0..4).map(|_| rng.f32() * std::f32::consts::TAU).collect();
+                    let phases: Vec<f32> =
+                        (0..4).map(|_| rng.f32() * std::f32::consts::TAU).collect();
                     let amps: Vec<f32> = (0..4).map(|_| rng.f32()).collect();
                     let max_r = rad * (1.0 + rough);
                     disc(max_r, off, |dx, dy, d| {
                         let a = (dy as f32 - off.1).atan2(dx as f32 - off.0);
                         let mut w = 0.0;
                         for k in 0..4 {
-                            w += amps[k] * ((k as f32 + 2.0) * a + phases[k]).sin() / (k as f32 + 1.0);
+                            w += amps[k] * ((k as f32 + 2.0) * a + phases[k]).sin()
+                                / (k as f32 + 1.0);
                         }
                         let edge = rad * (1.0 + rough * 0.5 * w);
                         if d <= edge && rng.f32() < density {
@@ -142,7 +185,13 @@ impl ObjectProto {
                         }
                     });
                 }
-                PrimRt::Rect { layer, mat, size, off, density } => {
+                PrimRt::Rect {
+                    layer,
+                    mat,
+                    size,
+                    off,
+                    density,
+                } => {
                     let x0 = (off.0 - size.0 as f32 / 2.0).round() as i32;
                     let y0 = (off.1 - size.1 as f32 / 2.0).round() as i32;
                     for y in 0..size.1 {
@@ -153,7 +202,13 @@ impl ObjectProto {
                         }
                     }
                 }
-                PrimRt::Scatter { layer, mat, r, count, off } => {
+                PrimRt::Scatter {
+                    layer,
+                    mat,
+                    r,
+                    count,
+                    off,
+                } => {
                     let n = rng.range_i32(count.0 as i32, count.1 as i32);
                     for _ in 0..n {
                         let a = rng.f32() * std::f32::consts::TAU;
@@ -166,7 +221,12 @@ impl ObjectProto {
             }
         }
         map.into_iter()
-            .map(|((l, dx, dy), mat)| StampCell { dx, dy, layer: Layer::from_index(l as usize), mat })
+            .map(|((l, dx, dy), mat)| StampCell {
+                dx,
+                dy,
+                layer: Layer::from_index(l as usize),
+                mat,
+            })
             .collect()
     }
 }
@@ -252,7 +312,9 @@ pub struct Reactions {
 
 impl Reactions {
     pub fn is_active(&self, layer: Layer, mat: MatId) -> bool {
-        self.active[layer.index()].get(mat as usize).is_some_and(|v| !v.is_empty())
+        self.active[layer.index()]
+            .get(mat as usize)
+            .is_some_and(|v| !v.is_empty())
     }
 }
 
@@ -268,7 +330,12 @@ pub struct SpriteRt {
 impl SpriteRt {
     pub fn compile(def: &SpriteDef) -> Result<SpriteRt, String> {
         let h = def.rows.len() as u32;
-        let w = def.rows.iter().map(|r| r.chars().count()).max().unwrap_or(0) as u32;
+        let w = def
+            .rows
+            .iter()
+            .map(|r| r.chars().count())
+            .max()
+            .unwrap_or(0) as u32;
         let mut pixels = vec![[0u8; 4]; (w * h) as usize];
         let mut slots = Vec::new();
         for (y, row) in def.rows.iter().enumerate() {
@@ -284,7 +351,12 @@ impl SpriteRt {
                 }
             }
         }
-        Ok(SpriteRt { w, h, pixels, slots })
+        Ok(SpriteRt {
+            w,
+            h,
+            pixels,
+            slots,
+        })
     }
 
     /// A little pile of particles in one colour, for items without a sprite.
@@ -310,7 +382,12 @@ impl SpriteRt {
                 }
             }
         }
-        SpriteRt { w: 4, h: 5, pixels, slots: Vec::new() }
+        SpriteRt {
+            w: 4,
+            h: 5,
+            pixels,
+            slots: Vec::new(),
+        }
     }
 }
 
@@ -370,6 +447,7 @@ impl Content {
                 walk_cost: 1.0,
                 hardness: 1.0,
                 yields: None,
+                heat: 0.0,
             },
             "engine",
         );
@@ -419,10 +497,16 @@ impl Content {
         &self.mats[m as usize]
     }
     pub fn mat_name(&self, m: MatId) -> &str {
-        self.materials.try_idx(m as usize).map(|d| d.name.as_str()).unwrap_or("?")
+        self.materials
+            .try_idx(m as usize)
+            .map(|d| d.name.as_str())
+            .unwrap_or("?")
     }
     pub fn mat_id_str(&self, m: MatId) -> &str {
-        self.materials.try_idx(m as usize).map(|d| d.id.as_str()).unwrap_or(NONE_ID)
+        self.materials
+            .try_idx(m as usize)
+            .map(|d| d.id.as_str())
+            .unwrap_or(NONE_ID)
     }
 
     /// Resolve all string references and build the runtime tables.
@@ -446,7 +530,11 @@ impl Content {
                     }),
                     None => SpriteRt::pile(color),
                 };
-                ItemRt { color, stack: d.stack.max(1), sprite }
+                ItemRt {
+                    color,
+                    stack: d.stack.max(1),
+                    sprite,
+                }
             })
             .collect();
 
@@ -462,7 +550,10 @@ impl Content {
                 let yields = d.yields.as_ref().and_then(|y| match items.idx(&y.item) {
                     Some(i) => Some((i, y.per.max(1))),
                     None => {
-                        errs.push(format!("material {}: unknown yield item '{}'", d.id, y.item));
+                        errs.push(format!(
+                            "material {}: unknown yield item '{}'",
+                            d.id, y.item
+                        ));
                         None
                     }
                 });
@@ -478,6 +569,8 @@ impl Content {
                     leaves: d.tags.iter().any(|t| t == "leaves"),
                     evergreen: d.tags.iter().any(|t| t == "evergreen"),
                     roof: d.tags.iter().any(|t| t == "roof"),
+                    heat: d.heat,
+                    hot: d.tags.iter().any(|t| t == "hot"),
                     water: d.tags.iter().any(|t| t == "water"),
                 }
             })
@@ -530,7 +623,12 @@ impl Content {
                                     dx -= w / 2;
                                     dy -= h / 2;
                                 }
-                                cells.push(StampCell { dx, dy, layer: pl.layer, mat });
+                                cells.push(StampCell {
+                                    dx,
+                                    dy,
+                                    layer: pl.layer,
+                                    mat,
+                                });
                             }
                         }
                     }
@@ -539,14 +637,27 @@ impl Content {
                 ShapeDef::Procedural(list) => {
                     for p in list {
                         prims.push(match p {
-                            Primitive::Circle { layer, material, radius, offset, density } => PrimRt::Circle {
+                            Primitive::Circle {
+                                layer,
+                                material,
+                                radius,
+                                offset,
+                                density,
+                            } => PrimRt::Circle {
                                 layer: *layer,
                                 mat: mat_ref(material, &ctx, &mut errs),
                                 r: *radius,
                                 off: *offset,
                                 density: *density,
                             },
-                            Primitive::Blob { layer, material, radius, offset, roughness, density } => PrimRt::Blob {
+                            Primitive::Blob {
+                                layer,
+                                material,
+                                radius,
+                                offset,
+                                roughness,
+                                density,
+                            } => PrimRt::Blob {
                                 layer: *layer,
                                 mat: mat_ref(material, &ctx, &mut errs),
                                 r: *radius,
@@ -554,14 +665,26 @@ impl Content {
                                 rough: *roughness,
                                 density: *density,
                             },
-                            Primitive::Rect { layer, material, size, offset, density } => PrimRt::Rect {
+                            Primitive::Rect {
+                                layer,
+                                material,
+                                size,
+                                offset,
+                                density,
+                            } => PrimRt::Rect {
                                 layer: *layer,
                                 mat: mat_ref(material, &ctx, &mut errs),
                                 size: *size,
                                 off: *offset,
                                 density: *density,
                             },
-                            Primitive::Scatter { layer, material, radius, count, offset } => PrimRt::Scatter {
+                            Primitive::Scatter {
+                                layer,
+                                material,
+                                radius,
+                                count,
+                                offset,
+                            } => PrimRt::Scatter {
                                 layer: *layer,
                                 mat: mat_ref(material, &ctx, &mut errs),
                                 r: *radius,
@@ -575,7 +698,9 @@ impl Content {
             let drops = d
                 .drops
                 .iter()
-                .filter_map(|dr| item_ref(&dr.item, &ctx, &mut errs).map(|i| (i, dr.min, dr.max.max(dr.min))))
+                .filter_map(|dr| {
+                    item_ref(&dr.item, &ctx, &mut errs).map(|i| (i, dr.min, dr.max.max(dr.min)))
+                })
                 .collect();
             let build = d.build.as_ref().map(|b| BuildRt {
                 cost: b
@@ -584,10 +709,18 @@ impl Content {
                     .filter_map(|(id, n)| item_ref(id, &ctx, &mut errs).map(|i| (i, *n)))
                     .collect(),
                 work: b.work.max(1),
-                category: if b.category.is_empty() { "misc".into() } else { b.category.clone() },
+                category: if b.category.is_empty() {
+                    "misc".into()
+                } else {
+                    b.category.clone()
+                },
             });
             let regrow = d.regrow.as_ref().map(|r| RegrowRt {
-                mats: r.materials.iter().map(|m| mat_ref(m, &ctx, &mut errs)).collect(),
+                mats: r
+                    .materials
+                    .iter()
+                    .map(|m| mat_ref(m, &ctx, &mut errs))
+                    .collect(),
                 interval: r.interval.max(1),
                 chance: r.chance,
             });
@@ -612,22 +745,43 @@ impl Content {
         for (i, d) in self.objects.iter() {
             if let Some(s) = &d.spread {
                 match self.objects.idx(&s.object) {
-                    Some(n) => protos[i].spread = Some((n, s.chance, s.radius.max(1), s.interval.max(30), s.max_nearby)),
-                    None => errs.push(format!("object {}: unknown spread object '{}'", d.id, s.object)),
+                    Some(n) => {
+                        protos[i].spread = Some((
+                            n,
+                            s.chance,
+                            s.radius.max(1),
+                            s.interval.max(30),
+                            s.max_nearby,
+                        ))
+                    }
+                    None => errs.push(format!(
+                        "object {}: unknown spread object '{}'",
+                        d.id, s.object
+                    )),
                 }
             }
             if let Some(g) = &d.growth {
                 match self.objects.idx(&g.next) {
                     Some(n) => protos[i].growth = Some((n, g.ticks.max(1))),
-                    None => errs.push(format!("object {}: unknown growth target '{}'", d.id, g.next)),
+                    None => errs.push(format!(
+                        "object {}: unknown growth target '{}'",
+                        d.id, g.next
+                    )),
                 }
             }
         }
         for p in &mut protos {
             let cells = p.cells(0);
-            p.blocks = cells.iter().any(|c| c.layer == Layer::Solid && self.mats.get(c.mat as usize).is_some_and(|m| m.blocks));
-            p.gives_support =
-                cells.iter().any(|c| c.layer == Layer::Solid && self.mats.get(c.mat as usize).is_some_and(|m| m.blocks && m.support));
+            p.blocks = cells.iter().any(|c| {
+                c.layer == Layer::Solid && self.mats.get(c.mat as usize).is_some_and(|m| m.blocks)
+            });
+            p.gives_support = cells.iter().any(|c| {
+                c.layer == Layer::Solid
+                    && self
+                        .mats
+                        .get(c.mat as usize)
+                        .is_some_and(|m| m.blocks && m.support)
+            });
         }
         self.protos = protos;
 
@@ -649,7 +803,11 @@ impl Content {
                 .scatter
                 .iter()
                 .filter_map(|s| match self.objects.idx(&s.object) {
-                    Some(o) => Some(ScatterRt { object: o, spacing: s.spacing.max(1), chance: s.chance }),
+                    Some(o) => Some(ScatterRt {
+                        object: o,
+                        spacing: s.spacing.max(1),
+                        chance: s.chance,
+                    }),
                     None => {
                         errs.push(format!("{ctx}: unknown object '{}'", s.object));
                         None
@@ -664,7 +822,17 @@ impl Content {
                 temperature: d.temperature,
                 floors,
                 solid: d.solid.as_ref().map(|s| mat_ref(s, &ctx, &mut errs)),
-                veins: d.veins.iter().map(|v| (mat_ref(&v.material, &ctx, &mut errs), v.threshold, v.frequency)).collect(),
+                veins: d
+                    .veins
+                    .iter()
+                    .map(|v| {
+                        (
+                            mat_ref(&v.material, &ctx, &mut errs),
+                            v.threshold,
+                            v.frequency,
+                        )
+                    })
+                    .collect(),
                 scatter,
             });
         }
@@ -694,11 +862,18 @@ impl Content {
         for (_, d) in self.reactions.iter() {
             let ctx = format!("reaction {}", d.id);
             let input = mask(&d.input, &ctx, &mut errs);
-            let neighbor = d.neighbor.as_ref().map(|n| (n.layer, mask(&n.matches, &ctx, &mut errs), n.same_cell));
+            let neighbor = d
+                .neighbor
+                .as_ref()
+                .map(|n| (n.layer, mask(&n.matches, &ctx, &mut errs), n.same_cell));
             let effects = d
                 .effects
                 .iter()
-                .map(|e| EffectRt { target: e.target, layer: e.layer, mat: mat_ref(&e.set, &ctx, &mut errs) })
+                .map(|e| EffectRt {
+                    target: e.target,
+                    layer: e.layer,
+                    mat: mat_ref(&e.set, &ctx, &mut errs),
+                })
                 .collect();
             let idx = rx.list.len();
             rx.list.push(ReactionRt {
@@ -709,7 +884,10 @@ impl Content {
                 wet: d.wet.max(0.0),
                 windy: d.windy,
                 swap: d.swap,
-                temp: (d.min_temp.unwrap_or(f32::MIN), d.max_temp.unwrap_or(f32::MAX)),
+                temp: (
+                    d.min_temp.unwrap_or(f32::MIN),
+                    d.max_temp.unwrap_or(f32::MAX),
+                ),
             });
             let table = match d.mode {
                 ReactionMode::Active => &mut rx.active,

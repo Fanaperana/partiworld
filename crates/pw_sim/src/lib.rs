@@ -28,7 +28,10 @@ pub struct SimSettings {
 
 impl Default for SimSettings {
     fn default() -> Self {
-        Self { random_samples: 64, max_active: 60_000 }
+        Self {
+            random_samples: 64,
+            max_active: 60_000,
+        }
     }
 }
 
@@ -65,7 +68,15 @@ fn pick_dir(rng: &mut Rng, r: &ReactionRt, same_cell: bool, env: &SimEnv) -> (i3
     (dx, dy)
 }
 
-fn apply(world: &mut World, content: &Content, rng: &mut Rng, r: &ReactionRt, x: i32, y: i32, env: &SimEnv) -> bool {
+fn apply(
+    world: &mut World,
+    content: &Content,
+    rng: &mut Rng,
+    r: &ReactionRt,
+    x: i32,
+    y: i32,
+    env: &SimEnv,
+) -> bool {
     if env.temp < r.temp.0 || env.temp > r.temp.1 {
         return false;
     }
@@ -115,7 +126,13 @@ fn apply(world: &mut World, content: &Content, rng: &mut Rng, r: &ReactionRt, x:
     true
 }
 
-pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimSettings, env: &SimEnv) {
+pub fn tick(
+    world: &mut World,
+    content: &Content,
+    rng: &mut Rng,
+    settings: &SimSettings,
+    env: &SimEnv,
+) {
     let rx = &content.reaction_rt;
     let mut keys: Vec<ChunkPos> = world.chunks.keys().copied().collect();
     keys.sort();
@@ -123,7 +140,9 @@ pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimS
     // Active cells.
     let mut budget = settings.max_active;
     for cp in &keys {
-        let Some(chunk) = world.chunks.get_mut(cp) else { continue };
+        let Some(chunk) = world.chunks.get_mut(cp) else {
+            continue;
+        };
         if chunk.active.is_empty() {
             continue;
         }
@@ -142,7 +161,9 @@ pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimS
             let layer = Layer::from_index(l as usize);
             let (x, y) = (ox + (i as i32 % CHUNK), oy + (i as i32 / CHUNK));
             let m = world.get(x, y, layer);
-            let Some(list) = rx.active[layer.index()].get(m as usize) else { continue };
+            let Some(list) = rx.active[layer.index()].get(m as usize) else {
+                continue;
+            };
             if list.is_empty() {
                 continue;
             }
@@ -166,7 +187,10 @@ pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimS
     }
 
     // Random ticks. Layers with no random reactions at all are skipped.
-    let layers: Vec<Layer> = Layer::ALL.into_iter().filter(|l| rx.random[l.index()].iter().any(|v| !v.is_empty())).collect();
+    let layers: Vec<Layer> = Layer::ALL
+        .into_iter()
+        .filter(|l| rx.random[l.index()].iter().any(|v| !v.is_empty()))
+        .collect();
     if layers.is_empty() {
         return;
     }
@@ -180,7 +204,10 @@ pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimS
                 let i = rng.below(CHUNK_CELLS);
                 for &layer in &layers {
                     let m = chunk.mat[layer.index()][i];
-                    if rx.random[layer.index()].get(m as usize).is_some_and(|v| !v.is_empty()) {
+                    if rx.random[layer.index()]
+                        .get(m as usize)
+                        .is_some_and(|v| !v.is_empty())
+                    {
                         hits.push((ox + i as i32 % CHUNK, oy + i as i32 / CHUNK, layer, m));
                     }
                 }

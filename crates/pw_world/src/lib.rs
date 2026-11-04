@@ -159,7 +159,11 @@ impl Chunk {
             }
             let n = (TILE * TILE) as u32;
             let walkable = blocked * 4 < n && no_floor * 2 < n;
-            let avg = if n > no_floor { cost / (n - no_floor) as f32 } else { 1.0 };
+            let avg = if n > no_floor {
+                cost / (n - no_floor) as f32
+            } else {
+                1.0
+            };
             self.tiles[t] = TileInfo {
                 walkable,
                 cost: avg * (1.0 + blocked as f32 / n as f32 * 2.0),
@@ -232,7 +236,10 @@ pub struct World {
 
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { seed, ..Default::default() }
+        Self {
+            seed,
+            ..Default::default()
+        }
     }
 
     pub fn chunk(&self, c: ChunkPos) -> Option<&Chunk> {
@@ -244,27 +251,60 @@ impl World {
     }
 
     pub fn get(&self, px: i32, py: i32, l: Layer) -> MatId {
-        self.chunks.get(&chunk_of(px, py)).map(|c| c.mat[l.index()][cell_index(px, py)]).unwrap_or(NONE_MAT)
+        self.chunks
+            .get(&chunk_of(px, py))
+            .map(|c| c.mat[l.index()][cell_index(px, py)])
+            .unwrap_or(NONE_MAT)
     }
 
     pub fn get_obj(&self, px: i32, py: i32, l: Layer) -> ObjId {
-        self.chunks.get(&chunk_of(px, py)).map(|c| c.obj[l.index()][cell_index(px, py)]).unwrap_or(NO_OBJ)
+        self.chunks
+            .get(&chunk_of(px, py))
+            .map(|c| c.obj[l.index()][cell_index(px, py)])
+            .unwrap_or(NO_OBJ)
     }
 
     /// Set a particle. If it replaces a particle that belonged to an object,
     /// that object counts the loss (and may break).
-    pub fn set(&mut self, content: &Content, px: i32, py: i32, l: Layer, m: MatId, obj: ObjId) -> bool {
+    pub fn set(
+        &mut self,
+        content: &Content,
+        px: i32,
+        py: i32,
+        l: Layer,
+        m: MatId,
+        obj: ObjId,
+    ) -> bool {
         self.set_inner(content, px, py, l, m, obj, true)
     }
 
     /// Like `set`, but an owning object does not count the loss (harvesting, regrowth).
-    pub fn set_raw(&mut self, content: &Content, px: i32, py: i32, l: Layer, m: MatId, obj: ObjId) -> bool {
+    pub fn set_raw(
+        &mut self,
+        content: &Content,
+        px: i32,
+        py: i32,
+        l: Layer,
+        m: MatId,
+        obj: ObjId,
+    ) -> bool {
         self.set_inner(content, px, py, l, m, obj, false)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn set_inner(&mut self, content: &Content, px: i32, py: i32, l: Layer, m: MatId, obj: ObjId, count: bool) -> bool {
-        let Some(c) = self.chunks.get_mut(&chunk_of(px, py)) else { return false };
+    fn set_inner(
+        &mut self,
+        content: &Content,
+        px: i32,
+        py: i32,
+        l: Layer,
+        m: MatId,
+        obj: ObjId,
+        count: bool,
+    ) -> bool {
+        let Some(c) = self.chunks.get_mut(&chunk_of(px, py)) else {
+            return false;
+        };
         let i = cell_index(px, py);
         let li = l.index();
         let old_obj = c.obj[li][i];
@@ -289,7 +329,9 @@ impl World {
     }
 
     pub fn tile(&self, t: TilePos) -> Option<TileInfo> {
-        self.chunks.get(&t.chunk()).map(|c| c.tiles[t.local_index()])
+        self.chunks
+            .get(&t.chunk())
+            .map(|c| c.tiles[t.local_index()])
     }
 
     pub fn walkable(&self, t: TilePos) -> bool {
@@ -326,13 +368,18 @@ impl World {
     /// Reads chunk arrays directly, so big areas stay fast.
     pub fn objects_in_rect(&self, rect: TileRect) -> Vec<ObjId> {
         let (x0, y0) = rect.min.origin();
-        let (x1, y1) = (rect.max.origin().0 + TILE - 1, rect.max.origin().1 + TILE - 1);
+        let (x1, y1) = (
+            rect.max.origin().0 + TILE - 1,
+            rect.max.origin().1 + TILE - 1,
+        );
         let (c0, c1) = (chunk_of(x0, y0), chunk_of(x1, y1));
         let mut seen: FastSet<ObjId> = FastSet::default();
         let mut out = Vec::new();
         for cy in c0.y..=c1.y {
             for cx in c0.x..=c1.x {
-                let Some(ch) = self.chunks.get(&ChunkPos::new(cx, cy)) else { continue };
+                let Some(ch) = self.chunks.get(&ChunkPos::new(cx, cy)) else {
+                    continue;
+                };
                 let (ox, oy) = ch.pos.origin();
                 let (lx0, ly0) = ((x0 - ox).max(0), (y0 - oy).max(0));
                 let (lx1, ly1) = ((x1 - ox).min(CHUNK - 1), (y1 - oy).min(CHUNK - 1));

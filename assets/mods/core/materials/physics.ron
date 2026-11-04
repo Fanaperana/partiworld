@@ -8,9 +8,9 @@
     MaterialDef(id: "core:deep_ice", name: "Thick ice", color: "#a8c8e0", variance: 0.06, walk_cost: 1.4, tags: ["ice", "cold"]),
 
     // Lava flows a short way (lava -> flow -> edge), sets things alight, then cools to basalt.
-    MaterialDef(id: "core:lava", name: "Lava", color: "#ff5a14", variance: 0.35, walk_cost: 0.0, tags: ["hot", "glow", "lava"]),
-    MaterialDef(id: "core:lava_flow", name: "Lava", color: "#f0480f", variance: 0.35, walk_cost: 0.0, tags: ["hot", "glow", "lava"]),
-    MaterialDef(id: "core:lava_edge", name: "Cooling lava", color: "#a8320e", variance: 0.4, walk_cost: 0.0, tags: ["hot", "lava"]),
+    MaterialDef(id: "core:lava", name: "Lava", color: "#ff5a14", variance: 0.35, walk_cost: 0.0, tags: ["hot", "glow", "lava"], heat: 2.0),
+    MaterialDef(id: "core:lava_flow", name: "Lava", color: "#f0480f", variance: 0.35, walk_cost: 0.0, tags: ["hot", "glow", "lava"], heat: 2.0),
+    MaterialDef(id: "core:lava_edge", name: "Cooling lava", color: "#a8320e", variance: 0.4, walk_cost: 0.0, tags: ["hot", "lava"], heat: 1.0),
     MaterialDef(id: "core:basalt", name: "Basalt", color: "#3b3634", variance: 0.14, walk_cost: 1.1),
     MaterialDef(id: "core:glass", name: "Glass", color: "#b8e4e0", variance: 0.1, walk_cost: 1.0),
 

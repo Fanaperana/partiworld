@@ -22,4 +22,7 @@ CreatureDef(
         "skin": ["#f1c9a5", "#d9a47a", "#b07850", "#8a5a3a", "#5e3d27"],
         "shirt": ["#3f6fb5", "#b53f3f", "#3fa060", "#c09030", "#7a4fb0", "#d06a2a", "#408a8a"],
     },
+    // Hunger, sleep and warmth. A full meal lasts a day; they need sleep
+    // about every 18 hours, and get cold below 12 C.
+    needs: NeedsDef(food_days: 1.0, awake_days: 0.75, comfort: (12.0, 32.0), toughness: 1.0),
 )

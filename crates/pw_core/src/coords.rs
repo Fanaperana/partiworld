@@ -9,13 +9,17 @@ pub const CHUNK: i32 = TILE * CHUNK_TILES;
 pub const CHUNK_CELLS: usize = (CHUNK * CHUNK) as usize;
 pub const CHUNK_TILE_COUNT: usize = (CHUNK_TILES * CHUNK_TILES) as usize;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
 pub struct ChunkPos {
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
 pub struct TilePos {
     pub x: i32,
     pub y: i32,
@@ -47,7 +51,10 @@ impl TilePos {
         )
     }
     pub fn chunk(self) -> ChunkPos {
-        ChunkPos::new(self.x.div_euclid(CHUNK_TILES), self.y.div_euclid(CHUNK_TILES))
+        ChunkPos::new(
+            self.x.div_euclid(CHUNK_TILES),
+            self.y.div_euclid(CHUNK_TILES),
+        )
     }
     /// Index of this tile inside its chunk's tile array.
     pub fn local_index(self) -> usize {

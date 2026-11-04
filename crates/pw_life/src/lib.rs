@@ -33,8 +33,17 @@ pub const G_BOLDNESS: usize = 5;
 pub const G_COLD: usize = 6;
 pub const G_LIFESPAN: usize = 7;
 pub const G_HUE: usize = 8;
-pub const GENE_NAMES: [&str; GENES] =
-    ["speed", "size", "sight", "metabolism", "fertility", "boldness", "cold tolerance", "lifespan", "colour"];
+pub const GENE_NAMES: [&str; GENES] = [
+    "speed",
+    "size",
+    "sight",
+    "metabolism",
+    "fertility",
+    "boldness",
+    "cold tolerance",
+    "lifespan",
+    "colour",
+];
 
 pub const ACTIONS: usize = 7;
 pub const A_EAT: u8 = 0;
@@ -44,7 +53,15 @@ pub const A_MATE: u8 = 3;
 pub const A_HERD: u8 = 4;
 pub const A_WANDER: u8 = 5;
 pub const A_REST: u8 = 6;
-pub const ACTION_NAMES: [&str; ACTIONS] = ["Eating", "Fleeing", "Hunting", "Looking for a mate", "With the herd", "Wandering", "Resting"];
+pub const ACTION_NAMES: [&str; ACTIONS] = [
+    "Eating",
+    "Fleeing",
+    "Hunting",
+    "Looking for a mate",
+    "With the herd",
+    "Wandering",
+    "Resting",
+];
 
 /// How far a lineage must drift from its species' founders to be a new species.
 const SPECIATION: f32 = 0.42;
@@ -153,9 +170,20 @@ pub struct Species {
 /// What the rest of the game needs to hear about.
 #[derive(Clone, Debug)]
 pub enum LifeEvent {
-    Died { def: usize, species: u32, pos: (f32, f32), cause: Death },
-    NewSpecies { id: u32, name: String, from: String },
-    Extinct { name: String },
+    Died {
+        def: usize,
+        species: u32,
+        pos: (f32, f32),
+        cause: Death,
+    },
+    NewSpecies {
+        id: u32,
+        name: String,
+        from: String,
+    },
+    Extinct {
+        name: String,
+    },
 }
 
 /// The world as wild life sees it this tick.
@@ -197,8 +225,14 @@ fn resolve(content: &Content) -> Vec<Option<LifeRt>> {
             let mut hunt = Vec::new();
             for f in &life.diet {
                 match f {
-                    FoodDef::Graze { matches, leaves, energy } => {
-                        if let (Some(mask), Some(m)) = (content.mat_mask(matches), content.mat(leaves)) {
+                    FoodDef::Graze {
+                        matches,
+                        leaves,
+                        energy,
+                    } => {
+                        if let (Some(mask), Some(m)) =
+                            (content.mat_mask(matches), content.mat(leaves))
+                        {
                             graze.push((mask, m, *energy));
                         }
                     }
@@ -206,7 +240,13 @@ fn resolve(content: &Content) -> Vec<Option<LifeRt>> {
                     FoodDef::Hunt { tags, energy } => hunt.push((tags.clone(), *energy)),
                 }
             }
-            Some(LifeRt { speed: d.speed, life, graze, browse, hunt })
+            Some(LifeRt {
+                speed: d.speed,
+                life,
+                graze,
+                browse,
+                hunt,
+            })
         })
         .collect()
 }
@@ -238,8 +278,15 @@ fn burn(rt: &LifeRt, c: &Creature, env: &LifeEnv, moving: bool) -> f32 {
     let g = &c.genes;
     let hour = env.day_ticks as f32 / 24.0;
     let mut b = max_energy(rt, g) * rt.life.hunger / hour;
-    b *= (0.6 + 0.4 * g[G_SPEED] * g[G_SPEED]) * (0.8 + 0.2 * g[G_SIGHT]) / g[G_METABOLISM].max(0.3);
-    b *= if moving { 1.25 } else if c.action == A_REST { 0.45 } else { 0.8 };
+    b *=
+        (0.6 + 0.4 * g[G_SPEED] * g[G_SPEED]) * (0.8 + 0.2 * g[G_SIGHT]) / g[G_METABOLISM].max(0.3);
+    b *= if moving {
+        1.25
+    } else if c.action == A_REST {
+        0.45
+    } else {
+        0.8
+    };
     let limit = cold_limit(rt, g);
     if env.temp < limit {
         b *= 1.0 + (limit - env.temp) * 0.12;
@@ -261,15 +308,69 @@ fn name_for(base: &str, founder: &[f32; GENES], g: &[f32; GENES]) -> String {
     }
     let up = best.1 > 0.0;
     let word = match best.0 {
-        G_SPEED => if up { "Swift" } else { "Plodding" },
-        G_SIZE => if up { "Giant" } else { "Dwarf" },
-        G_SIGHT => if up { "Keen-eyed" } else { "Dim-eyed" },
-        G_METABOLISM => if up { "Hardy" } else { "Hungry" },
-        G_FERTILITY => if up { "Fertile" } else { "Rare" },
-        G_BOLDNESS => if up { "Bold" } else { "Timid" },
-        G_COLD => if up { "Woolly" } else { "Sleek" },
-        G_LIFESPAN => if up { "Ancient" } else { "Brief" },
-        _ => if up { "Bright" } else { "Dusky" },
+        G_SPEED => {
+            if up {
+                "Swift"
+            } else {
+                "Plodding"
+            }
+        }
+        G_SIZE => {
+            if up {
+                "Giant"
+            } else {
+                "Dwarf"
+            }
+        }
+        G_SIGHT => {
+            if up {
+                "Keen-eyed"
+            } else {
+                "Dim-eyed"
+            }
+        }
+        G_METABOLISM => {
+            if up {
+                "Hardy"
+            } else {
+                "Hungry"
+            }
+        }
+        G_FERTILITY => {
+            if up {
+                "Fertile"
+            } else {
+                "Rare"
+            }
+        }
+        G_BOLDNESS => {
+            if up {
+                "Bold"
+            } else {
+                "Timid"
+            }
+        }
+        G_COLD => {
+            if up {
+                "Woolly"
+            } else {
+                "Sleek"
+            }
+        }
+        G_LIFESPAN => {
+            if up {
+                "Ancient"
+            } else {
+                "Brief"
+            }
+        }
+        _ => {
+            if up {
+                "Bright"
+            } else {
+                "Dusky"
+            }
+        }
     };
     format!("{word} {base}")
 }
@@ -303,7 +404,12 @@ impl Life {
     pub fn at(&self, p: (f32, f32), reach: f32) -> Option<&Creature> {
         self.creatures
             .iter()
-            .map(|c| (((c.pos.0 - p.0).powi(2) + (c.pos.1 - p.1).powi(2)).sqrt(), c))
+            .map(|c| {
+                (
+                    ((c.pos.0 - p.0).powi(2) + (c.pos.1 - p.1).powi(2)).sqrt(),
+                    c,
+                )
+            })
             .filter(|(d, _)| *d <= reach)
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|x| x.1)
@@ -315,7 +421,11 @@ impl Life {
 
     fn base_species(&mut self, content: &Content, def: usize, tick: u64) -> u32 {
         let def_id = content.creatures.by_idx(def).id.clone();
-        if let Some(s) = self.species.iter().find(|s| s.def_id == def_id && s.parent.is_none()) {
+        if let Some(s) = self
+            .species
+            .iter()
+            .find(|s| s.def_id == def_id && s.parent.is_none())
+        {
             return s.id;
         }
         let id = self.species.len() as u32 + 1;
@@ -338,7 +448,15 @@ impl Life {
     }
 
     /// Spawn a grown wild creature of a def. Returns its id.
-    pub fn spawn(&mut self, content: &Content, def: usize, tile: TilePos, rng: &mut Rng, tick: u64, day_ticks: u64) -> Option<u32> {
+    pub fn spawn(
+        &mut self,
+        content: &Content,
+        def: usize,
+        tile: TilePos,
+        rng: &mut Rng,
+        tick: u64,
+        day_ticks: u64,
+    ) -> Option<u32> {
         let life = content.creatures.by_idx(def).life.as_ref()?;
         if self.creatures.len() >= MAX_CREATURES {
             return None;
@@ -392,7 +510,10 @@ impl Life {
 
     /// Kill a creature (it is removed on the next tick). Returns its def and position.
     pub fn kill(&mut self, id: u32, cause: Death) -> Option<(usize, (f32, f32))> {
-        let c = self.creatures.iter_mut().find(|c| c.id == id && c.dead.is_none())?;
+        let c = self
+            .creatures
+            .iter_mut()
+            .find(|c| c.id == id && c.dead.is_none())?;
         c.dead = Some(cause);
         Some((c.def, c.pos))
     }
@@ -402,7 +523,13 @@ impl Life {
         self.creatures.iter().filter(|c| c.def == def).count()
     }
 
-    pub fn tick(&mut self, world: &mut World, content: &Content, rng: &mut Rng, env: &LifeEnv) -> Vec<LifeEvent> {
+    pub fn tick(
+        &mut self,
+        world: &mut World,
+        content: &Content,
+        rng: &mut Rng,
+        env: &LifeEnv,
+    ) -> Vec<LifeEvent> {
         let mut events = Vec::new();
         if self.creatures.is_empty() {
             return events;
@@ -418,15 +545,27 @@ impl Life {
             .enumerate()
             .map(|(idx, c)| {
                 let ready = rts.get(c.def).and_then(|r| r.as_ref()).is_some_and(|rt| {
-                    adult(rt, c, day) && c.cooldown == 0 && c.energy > max_energy(rt, &c.genes) * 0.55
+                    adult(rt, c, day)
+                        && c.cooldown == 0
+                        && c.energy > max_energy(rt, &c.genes) * 0.55
                 });
-                Seen { idx, id: c.id, def: c.def, species: c.species, pos: c.pos, ready, dead: c.dead.is_some() }
+                Seen {
+                    idx,
+                    id: c.id,
+                    def: c.def,
+                    species: c.species,
+                    pos: c.pos,
+                    ready,
+                    dead: c.dead.is_some(),
+                }
             })
             .collect();
         let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
         for (i, s) in seen.iter().enumerate() {
             let t = tile_of_f(s.pos.0, s.pos.1);
-            grid.entry((t.x.div_euclid(8), t.y.div_euclid(8))).or_default().push(i);
+            grid.entry((t.x.div_euclid(8), t.y.div_euclid(8)))
+                .or_default()
+                .push(i);
         }
         let near = |p: (f32, f32), r_tiles: f32| -> Vec<usize> {
             let t = tile_of_f(p.0, p.1);
@@ -448,7 +587,10 @@ impl Life {
             }
             out
         };
-        let def_tags: Vec<Vec<String>> = rts.iter().map(|r| r.as_ref().map(|r| r.life.tags.clone()).unwrap_or_default()).collect();
+        let def_tags: Vec<Vec<String>> = rts
+            .iter()
+            .map(|r| r.as_ref().map(|r| r.life.tags.clone()).unwrap_or_default())
+            .collect();
         let pop_by_def: HashMap<usize, usize> = seen.iter().fold(HashMap::new(), |mut m, s| {
             *m.entry(s.def).or_insert(0) += 1;
             m
@@ -460,7 +602,9 @@ impl Life {
         let mut taken: HashSet<usize> = HashSet::new();
 
         for i in 0..self.creatures.len() {
-            let Some(rt) = rts.get(self.creatures[i].def).and_then(|r| r.as_ref()) else { continue };
+            let Some(rt) = rts.get(self.creatures[i].def).and_then(|r| r.as_ref()) else {
+                continue;
+            };
             let c = &mut self.creatures[i];
             if c.dead.is_some() {
                 continue;
@@ -517,12 +661,16 @@ impl Life {
                     if o.idx == i || o.dead {
                         continue;
                     }
-                    let d = ((o.pos.0 - c.pos.0).powi(2) + (o.pos.1 - c.pos.1).powi(2)).sqrt() / TILE as f32;
+                    let d = ((o.pos.0 - c.pos.0).powi(2) + (o.pos.1 - c.pos.1).powi(2)).sqrt()
+                        / TILE as f32;
                     let tags = &def_tags[o.def];
                     if has_any(tags, &rt.life.flees) && threat.is_none_or(|t| d < t.0) {
                         threat = Some((d, o.pos));
                     }
-                    if o.species != c.species && rt.hunt.iter().any(|(t, _)| has_any(tags, t)) && prey.is_none_or(|p| d < p.0) {
+                    if o.species != c.species
+                        && rt.hunt.iter().any(|(t, _)| has_any(tags, t))
+                        && prey.is_none_or(|p| d < p.0)
+                    {
                         prey = Some((d, o.idx));
                     }
                     if o.def == c.def {
@@ -565,7 +713,8 @@ impl Life {
                         if let Some(o) = world.objects_in_tile(t).into_iter().find(|&o| {
                             world.objects.get(o).is_some_and(|inst| {
                                 let p = &content.protos[inst.def];
-                                !inst.built && rt.browse.iter().any(|(tags, _)| has_any(&p.tags, tags))
+                                !inst.built
+                                    && rt.browse.iter().any(|(tags, _)| has_any(&p.tags, tags))
                             })
                         }) {
                             food = Some(Target::Object(o));
@@ -577,21 +726,26 @@ impl Life {
                 let h = 1.0 - (c.energy / max_e).clamp(0.0, 1.0);
                 let g = c.genes;
                 let grown = adult(rt, c, day);
-                let crowded = pop_by_def.get(&c.def).copied().unwrap_or(0) >= rt.life.max_population as usize;
+                let crowded =
+                    pop_by_def.get(&c.def).copied().unwrap_or(0) >= rt.life.max_population as usize;
                 let mut score = [0.0f32; ACTIONS];
                 score[A_EAT as usize] = if food.is_some() { 0.15 + h * 1.3 } else { 0.0 };
                 if let Some((d, _)) = prey {
-                    score[A_HUNT as usize] = h * 1.2 * (0.6 + 0.4 * g[G_BOLDNESS]) * (1.0 - d / (s_r + 1.0)).max(0.2);
+                    score[A_HUNT as usize] =
+                        h * 1.2 * (0.6 + 0.4 * g[G_BOLDNESS]) * (1.0 - d / (s_r + 1.0)).max(0.2);
                 }
                 if let Some((d, _)) = threat {
-                    score[A_FLEE as usize] = (1.0 - d / (s_r + 1.0)).max(0.0) * 1.8 * (1.6 - 0.6 * g[G_BOLDNESS]).max(0.2);
+                    score[A_FLEE as usize] = (1.0 - d / (s_r + 1.0)).max(0.0)
+                        * 1.8
+                        * (1.6 - 0.6 * g[G_BOLDNESS]).max(0.2);
                 }
                 if c.danger.is_some_and(|t| t.chebyshev(here) < 4) {
                     score[A_FLEE as usize] = score[A_FLEE as usize].max(0.6);
                 }
                 if grown && c.cooldown == 0 && c.energy > max_e * 0.6 && !crowded {
                     let near_mate = mate.is_some() || !rt.life.needs_mate;
-                    score[A_MATE as usize] = (if near_mate { 1.0 } else { 0.3 }) * g[G_FERTILITY].min(2.0) * 0.9;
+                    score[A_MATE as usize] =
+                        (if near_mate { 1.0 } else { 0.3 }) * g[G_FERTILITY].min(2.0) * 0.9;
                 }
                 if rt.life.herd > 0.0 && kin > 0 {
                     let (mx, my) = (kx / kin as f32, ky / kin as f32);
@@ -630,8 +784,12 @@ impl Life {
                 }
                 c.target = match next {
                     A_EAT => food.unwrap_or(Target::None),
-                    A_HUNT => prey.map(|p| Target::Creature(seen[p.1].id)).unwrap_or(Target::None),
-                    A_MATE => mate.map(|m| Target::Creature(seen[m.1].id)).unwrap_or(Target::None),
+                    A_HUNT => prey
+                        .map(|p| Target::Creature(seen[p.1].id))
+                        .unwrap_or(Target::None),
+                    A_MATE => mate
+                        .map(|m| Target::Creature(seen[m.1].id))
+                        .unwrap_or(Target::None),
                     A_FLEE => {
                         let from = threat
                             .map(|t| t.1)
@@ -639,17 +797,25 @@ impl Life {
                             .unwrap_or((c.pos.0 + 1.0, c.pos.1));
                         let (dx, dy) = (c.pos.0 - from.0, c.pos.1 - from.1);
                         let l = (dx * dx + dy * dy).sqrt().max(0.01);
-                        let far = (c.pos.0 + dx / l * 7.0 * TILE as f32, c.pos.1 + dy / l * 7.0 * TILE as f32);
+                        let far = (
+                            c.pos.0 + dx / l * 7.0 * TILE as f32,
+                            c.pos.1 + dy / l * 7.0 * TILE as f32,
+                        );
                         Target::Tile(tile_of_f(far.0, far.1))
                     }
                     A_HERD if kin > 0 => Target::Tile(tile_of_f(kx / kin as f32, ky / kin as f32)),
-                    A_WANDER => Target::Tile(here.offset(rng.range_i32(-6, 6), rng.range_i32(-6, 6))),
+                    A_WANDER => {
+                        Target::Tile(here.offset(rng.range_i32(-6, 6), rng.range_i32(-6, 6)))
+                    }
                     _ => Target::None,
                 };
                 if c.danger.is_some() && rng.chance(0.02) {
                     c.danger = None; // fear fades
                 }
-                if matches!(c.target, Target::Tile(_) | Target::Object(_)) || next == A_HUNT || next == A_MATE {
+                if matches!(c.target, Target::Tile(_) | Target::Object(_))
+                    || next == A_HUNT
+                    || next == A_MATE
+                {
                     c.path.clear();
                 }
             }
@@ -659,17 +825,27 @@ impl Life {
             let goal = match c.target {
                 Target::Tile(t) => Some(t),
                 Target::Object(o) => world.objects.get(o).map(|i| i.origin_tile()),
-                Target::Creature(id) => id_index.get(&id).map(|&k| tile_of_f(seen[k].pos.0, seen[k].pos.1)),
+                Target::Creature(id) => id_index
+                    .get(&id)
+                    .map(|&k| tile_of_f(seen[k].pos.0, seen[k].pos.1)),
                 Target::None => None,
             };
             let mut moving = false;
             if let Some(goal) = goal {
                 // Food and places: stand on the tile. Creatures and plants: stand next to them.
-                let reach = if matches!(c.target, Target::Tile(_)) { 0 } else { 1 };
+                let reach = if matches!(c.target, Target::Tile(_)) {
+                    0
+                } else {
+                    1
+                };
                 let close = goal.chebyshev(here) <= reach;
                 if !close {
-                    if c.path.is_empty() || c.action_ticks % 24 == 0 && c.path.first().is_none_or(|e| e.chebyshev(goal) > reach) {
-                        c.path = find_path(world, here, |t| t.chebyshev(goal) <= reach, goal, 260).unwrap_or_default();
+                    if c.path.is_empty()
+                        || c.action_ticks % 24 == 0
+                            && c.path.first().is_none_or(|e| e.chebyshev(goal) > reach)
+                    {
+                        c.path = find_path(world, here, |t| t.chebyshev(goal) <= reach, goal, 260)
+                            .unwrap_or_default();
                         if c.path.is_empty() {
                             // No path: give up on this target for now.
                             c.target = Target::None;
@@ -689,13 +865,18 @@ impl Life {
                     if let Some((mask, leaves, e)) = tile_food(world, &rt.graze, t) {
                         // Nibble the nearest bits around the mouth, a little at random,
                         // so grazed patches come out round and ragged, not square.
-                        let (mx, my) = (c.pos.0 + rng.range_f32(-1.5, 1.5), c.pos.1 + rng.range_f32(-1.5, 1.5));
+                        let (mx, my) = (
+                            c.pos.0 + rng.range_f32(-1.5, 1.5),
+                            c.pos.1 + rng.range_f32(-1.5, 1.5),
+                        );
                         let mut bites: Vec<(f32, i32, i32)> = Vec::new();
                         let r = 5;
                         for dy in -r..=r {
                             for dx in -r..=r {
                                 let (x, y) = (mx as i32 + dx, my as i32 + dy);
-                                let d = ((x as f32 + 0.5 - mx).powi(2) + (y as f32 + 0.5 - my).powi(2)).sqrt();
+                                let d = ((x as f32 + 0.5 - mx).powi(2)
+                                    + (y as f32 + 0.5 - my).powi(2))
+                                .sqrt();
                                 if d > r as f32 {
                                     continue;
                                 }
@@ -723,7 +904,9 @@ impl Life {
                             let e = rt.browse.first().map(|b| b.1).unwrap_or(1.0);
                             if objs::pluck(world, content, o, rng).is_some() {
                                 c.energy = (c.energy + e * 2.0).min(max_e);
-                            } else if objs::chip(world, content, o, rng, Some(Layer::Overlay)).is_some() {
+                            } else if objs::chip(world, content, o, rng, Some(Layer::Overlay))
+                                .is_some()
+                            {
                                 c.energy = (c.energy + e).min(max_e);
                             } else {
                                 c.think = 0;
@@ -750,8 +933,13 @@ impl Life {
                     } else if let Target::Creature(id) = c.target {
                         if let Some(&mi) = id_index.get(&id) {
                             let m = seen[mi];
-                            let d = ((m.pos.0 - c.pos.0).powi(2) + (m.pos.1 - c.pos.1).powi(2)).sqrt();
-                            if d <= TILE as f32 * 1.6 && m.ready && !taken.contains(&mi) && !taken.contains(&i) {
+                            let d =
+                                ((m.pos.0 - c.pos.0).powi(2) + (m.pos.1 - c.pos.1).powi(2)).sqrt();
+                            if d <= TILE as f32 * 1.6
+                                && m.ready
+                                && !taken.contains(&mi)
+                                && !taken.contains(&i)
+                            {
                                 births.push((i, Some(mi)));
                                 taken.insert(i);
                                 taken.insert(mi);
@@ -766,7 +954,11 @@ impl Life {
             let b = burn(rt, c, env, moving);
             c.energy -= b;
             if c.energy <= 0.0 {
-                c.dead = Some(if env.temp < cold_limit(rt, &c.genes) - 5.0 { Death::Froze } else { Death::Starved });
+                c.dead = Some(if env.temp < cold_limit(rt, &c.genes) - 5.0 {
+                    Death::Froze
+                } else {
+                    Death::Starved
+                });
             } else if c.age as f32 > rt.life.lifespan_days * c.genes[G_LIFESPAN] * day as f32 {
                 c.dead = Some(Death::OldAge);
             }
@@ -808,19 +1000,26 @@ impl Life {
 
         // ---- births
         for (mi, fi) in births {
-            let Some(rt) = rts.get(self.creatures[mi].def).and_then(|r| r.as_ref()) else { continue };
+            let Some(rt) = rts.get(self.creatures[mi].def).and_then(|r| r.as_ref()) else {
+                continue;
+            };
             let mother = self.creatures[mi].clone();
             let father = fi.map(|f| self.creatures[f].clone());
             if mother.dead.is_some() || father.as_ref().is_some_and(|f| f.dead.is_some()) {
                 continue;
             }
-            if self.count_def(mother.def) >= rt.life.max_population as usize || self.creatures.len() >= MAX_CREATURES {
+            if self.count_def(mother.def) >= rt.life.max_population as usize
+                || self.creatures.len() >= MAX_CREATURES
+            {
                 self.creatures[mi].cooldown = (day / 4) as u32;
                 continue;
             }
             let (lo, hi) = rt.life.litter;
             let base = rng.range_i32(lo as i32, hi.max(lo) as i32) as f32;
-            let n = ((base * mother.genes[G_FERTILITY] / mother.genes[G_METABOLISM].max(0.5).sqrt()).round() as u32).clamp(1, 8);
+            let n =
+                ((base * mother.genes[G_FERTILITY] / mother.genes[G_METABOLISM].max(0.5).sqrt())
+                    .round() as u32)
+                    .clamp(1, 8);
             let mut born = 0;
             for _ in 0..n {
                 let mut genes = [1.0f32; GENES];
@@ -840,11 +1039,17 @@ impl Life {
                     // Children start from what their parents learned, plus a little of their own.
                     brain[k] = (avg + gauss(rng) * 0.08).clamp(0.2, 3.0);
                 }
-                let generation = mother.generation.max(father.as_ref().map(|f| f.generation).unwrap_or(0)) + 1;
+                let generation = mother
+                    .generation
+                    .max(father.as_ref().map(|f| f.generation).unwrap_or(0))
+                    + 1;
                 // Has this lineage become something new?
                 let mut species = mother.species;
                 if let Some(sp) = self.species.iter().find(|s| s.id == species) {
-                    let drift = (0..GENES).map(|k| (genes[k] - sp.founder[k]).powi(2)).sum::<f32>().sqrt();
+                    let drift = (0..GENES)
+                        .map(|k| (genes[k] - sp.founder[k]).powi(2))
+                        .sum::<f32>()
+                        .sqrt();
                     if drift > SPECIATION {
                         let base = content.creatures.by_idx(mother.def).name.clone();
                         let name = name_for(&base, &sp.founder, &genes);
@@ -903,7 +1108,8 @@ impl Life {
                 }
                 born += 1;
             }
-            let wait = (rt.life.breed_every_hours * hour as f32 * mother.genes[G_LIFESPAN].sqrt() / mother.genes[G_FERTILITY].max(0.3)) as u32;
+            let wait = (rt.life.breed_every_hours * hour as f32 * mother.genes[G_LIFESPAN].sqrt()
+                / mother.genes[G_FERTILITY].max(0.3)) as u32;
             let m = &mut self.creatures[mi];
             m.energy -= max_energy(rt, &m.genes) * 0.15 * born as f32;
             m.cooldown = wait.max(60);
@@ -927,7 +1133,12 @@ impl Life {
                         s.died += 1;
                         s.causes[cause as usize] += 1;
                     }
-                    events.push(LifeEvent::Died { def: c.def, species: c.species, pos: c.pos, cause });
+                    events.push(LifeEvent::Died {
+                        def: c.def,
+                        species: c.species,
+                        pos: c.pos,
+                        cause,
+                    });
                 }
                 None => keep.push(c),
             }
@@ -943,7 +1154,9 @@ impl Life {
             let now = alive.get(&s.id).copied().unwrap_or(0);
             if s.alive > 0 && now == 0 && s.extinct_tick.is_none() {
                 s.extinct_tick = Some(env.tick);
-                events.push(LifeEvent::Extinct { name: s.name.clone() });
+                events.push(LifeEvent::Extinct {
+                    name: s.name.clone(),
+                });
             }
             if now > 0 {
                 s.extinct_tick = None;
@@ -961,13 +1174,21 @@ impl Life {
 }
 
 /// Grazing food on a tile: (mask, what's left behind, energy per particle).
-fn tile_food<'a>(world: &World, graze: &'a [(Vec<bool>, MatId, f32)], t: TilePos) -> Option<(&'a Vec<bool>, MatId, f32)> {
+fn tile_food<'a>(
+    world: &World,
+    graze: &'a [(Vec<bool>, MatId, f32)],
+    t: TilePos,
+) -> Option<(&'a Vec<bool>, MatId, f32)> {
     for (mask, leaves, e) in graze {
         let (x, y) = t.origin();
         // Sample a few cells; grazing leaves patches, so "some" is enough.
         let hits = [(1, 1), (6, 2), (3, 5), (5, 6), (2, 3)]
             .iter()
-            .filter(|&&(dx, dy)| mask.get(world.get(x + dx, y + dy, Layer::Floor) as usize).copied().unwrap_or(false))
+            .filter(|&&(dx, dy)| {
+                mask.get(world.get(x + dx, y + dy, Layer::Floor) as usize)
+                    .copied()
+                    .unwrap_or(false)
+            })
             .count();
         if hits >= 2 {
             return Some((mask, *leaves, *e));
@@ -978,7 +1199,9 @@ fn tile_food<'a>(world: &World, graze: &'a [(Vec<bool>, MatId, f32)], t: TilePos
 
 /// Walk one tick along the path. Returns true if it moved.
 fn step(c: &mut Creature, world: &World, speed_tiles: f32) -> bool {
-    let Some(&next) = c.path.last() else { return false };
+    let Some(&next) = c.path.last() else {
+        return false;
+    };
     let Some(info) = world.tile(next) else {
         c.path.clear();
         return false;

@@ -34,10 +34,16 @@ impl PwPlugin for DayAnnouncer {
 fn find_mods_dir() -> PathBuf {
     let candidates = [
         PathBuf::from("assets/mods"),
-        std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("assets/mods"))).unwrap_or_default(),
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("assets/mods")))
+            .unwrap_or_default(),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/mods"),
     ];
-    candidates.into_iter().find(|p| p.join("core/mod.toml").exists()).unwrap_or_else(|| PathBuf::from("assets/mods"))
+    candidates
+        .into_iter()
+        .find(|p| p.join("core/mod.toml").exists())
+        .unwrap_or_else(|| PathBuf::from("assets/mods"))
 }
 
 fn main() {
@@ -56,21 +62,33 @@ fn main() {
         eprintln!("Fix the mod errors above and start again.");
         std::process::exit(1);
     }
-    let seed = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(1337);
+    let seed = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1337);
     let plugins: Vec<Box<dyn PwPlugin>> = vec![Box::new(DayAnnouncer)];
     let ext = Arc::new(Extensions::from_plugins(&plugins));
     let game = Game::new(Arc::new(content), scripts, ext, seed, mods_dir);
 
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "Partiworld".into(), ..default() }),
+            primary_window: Some(Window {
+                title: "Partiworld".into(),
+                ..default()
+            }),
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
         .insert_resource(GameRes(game))
         .add_plugins((PwRenderPlugin, PwUiPlugin))
-        .add_systems(Update, autoshot.run_if(|| std::env::var("PW_AUTOSHOT").is_ok()))
-        .add_systems(Update, frame_stats.run_if(|| std::env::var("PW_FRAMES").is_ok()))
+        .add_systems(
+            Update,
+            autoshot.run_if(|| std::env::var("PW_AUTOSHOT").is_ok()),
+        )
+        .add_systems(
+            Update,
+            frame_stats.run_if(|| std::env::var("PW_FRAMES").is_ok()),
+        )
         .run();
 }
 
@@ -86,7 +104,10 @@ fn autoshot(
     mut clock: ResMut<pw_render::SimClock>,
 ) {
     let t = time.elapsed_secs();
-    if let Some(s) = std::env::var("PW_AUTOSHOT_SPEED").ok().and_then(|s| s.parse().ok()) {
+    if let Some(s) = std::env::var("PW_AUTOSHOT_SPEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
         clock.speed = s;
     }
     let g = &mut game.0;
@@ -94,7 +115,9 @@ fn autoshot(
         *step = 1;
         ui.show_help = false;
         let home = g.spawn_tile();
-        let r = |a: (i32, i32), b: (i32, i32)| pw_core::TileRect::from_corners(home.offset(a.0, a.1), home.offset(b.0, b.1));
+        let r = |a: (i32, i32), b: (i32, i32)| {
+            pw_core::TileRect::from_corners(home.offset(a.0, a.1), home.offset(b.0, b.1))
+        };
         g.designate("core:chop", r((-14, -10), (14, 10)), None);
         g.designate("core:harvest", r((-14, -10), (14, 10)), None);
         g.stockpile(r((-6, -6), (-3, -3)), true);
@@ -102,9 +125,18 @@ fn autoshot(
         g.build("core:floor_wood", r((4, 3), (7, 5)));
         g.build("core:roof_thatch", r((3, 2), (8, 6)));
         // Optional: start at a given hour to check day/night.
-        let day = std::env::var("PW_AUTOSHOT_DAY").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1).max(1) - 1;
-        let hour = std::env::var("PW_AUTOSHOT_HOUR").ok().and_then(|s| s.parse::<f32>().ok()).unwrap_or(6.0);
-        g.tick = day * pw_game::DAY_TICKS + (((hour - 6.0).rem_euclid(24.0) / 24.0) * pw_game::DAY_TICKS as f32) as u64;
+        let day = std::env::var("PW_AUTOSHOT_DAY")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1)
+            .max(1)
+            - 1;
+        let hour = std::env::var("PW_AUTOSHOT_HOUR")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(6.0);
+        g.tick = day * pw_game::DAY_TICKS
+            + (((hour - 6.0).rem_euclid(24.0) / 24.0) * pw_game::DAY_TICKS as f32) as u64;
         // Optional: force a weather, fully set in (rain, snow, fog...).
         if let Ok(w) = std::env::var("PW_AUTOSHOT_WEATHER") {
             let climate = g.content.climate.clone();
@@ -158,8 +190,21 @@ fn autoshot(
         }
         let (x, y) = home.offset(16, 10).center();
         g.ignite(x as i32, y as i32, 4);
+        // Optional: select a hungry colonist to show its needs, with a campfire close by.
+        if std::env::var("PW_AUTOSHOT_NEEDS").is_ok() {
+            let (x, y) = home.offset(3, -4).origin();
+            g.place_object("core:campfire", x, y);
+            if let Some(p) = g.colony.pawns.first_mut() {
+                p.needs.food = 0.25;
+                p.needs.rest = 0.55;
+                ui.selected = Some(p.id);
+            }
+        }
         // Optional: let the tribes live N days, then look at the first one.
-        if let Some(days) = std::env::var("PW_AUTOSHOT_TRIBES").ok().and_then(|s| s.parse::<u64>().ok()) {
+        if let Some(days) = std::env::var("PW_AUTOSHOT_TRIBES")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+        {
             for _ in 0..days * pw_game::DAY_TICKS {
                 g.step();
             }
@@ -170,11 +215,16 @@ fn autoshot(
             }
         }
     }
-    let shot_at: f32 = std::env::var("PW_AUTOSHOT_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(25.0);
+    let shot_at: f32 = std::env::var("PW_AUTOSHOT_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(25.0);
     if *step == 1 && t > shot_at {
         *step = 2;
         let path = std::env::var("PW_AUTOSHOT").unwrap();
-        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path));
     }
     if *step == 2 && t > shot_at + 2.0 {
         exit.write(AppExit::Success);
@@ -182,14 +232,24 @@ fn autoshot(
 }
 
 /// Testing aid: `PW_FRAMES=1` prints frame time stats every 2 seconds.
-fn frame_stats(time: Res<Time>, mut acc: Local<(f32, f32, u32, f32)>, clock: Res<pw_render::SimClock>) {
+fn frame_stats(
+    time: Res<Time>,
+    mut acc: Local<(f32, f32, u32, f32)>,
+    clock: Res<pw_render::SimClock>,
+) {
     let dt = time.delta_secs() * 1000.0;
     acc.0 += dt;
     acc.1 = acc.1.max(dt);
     acc.2 += 1;
     acc.3 += time.delta_secs();
     if acc.3 >= 2.0 {
-        println!("FRAMES avg {:.2} ms, worst {:.2} ms, {} frames, speed {}", acc.0 / acc.2 as f32, acc.1, acc.2, clock.speed);
+        println!(
+            "FRAMES avg {:.2} ms, worst {:.2} ms, {} frames, speed {}",
+            acc.0 / acc.2 as f32,
+            acc.1,
+            acc.2,
+            clock.speed
+        );
         *acc = (0.0, 0.0, 0, 0.0);
     }
 }

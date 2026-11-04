@@ -1,4 +1,4 @@
 [
     // Fire is a particle like any other; the reactions in reactions/fire.ron make it spread and burn out.
-    MaterialDef(id: "core:fire", name: "Fire", color: "#ff8a1f", variance: 0.45, tags: ["glow", "hot"]),
+    MaterialDef(id: "core:fire", name: "Fire", color: "#ff8a1f", variance: 0.45, tags: ["glow", "hot"], heat: 1.5),
 ]

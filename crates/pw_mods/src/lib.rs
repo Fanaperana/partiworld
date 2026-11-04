@@ -27,7 +27,10 @@ impl Default for ScriptHost {
         let mut engine = Engine::new();
         engine.set_max_operations(2_000_000);
         engine.set_max_call_levels(64);
-        Self { engine, asts: BTreeMap::new() }
+        Self {
+            engine,
+            asts: BTreeMap::new(),
+        }
     }
 }
 
@@ -38,7 +41,10 @@ impl ScriptHost {
             Some((m, f)) => (Some(m), f),
             None => (None, name),
         };
-        let has = |ast: &AST| ast.iter_functions().any(|f| f.name == fname && f.params.len() == arity);
+        let has = |ast: &AST| {
+            ast.iter_functions()
+                .any(|f| f.name == fname && f.params.len() == arity)
+        };
         if let Some(m) = want_mod {
             return self.asts.get(m).filter(|a| has(a));
         }
@@ -83,11 +89,17 @@ pub fn discover(mods_dir: &Path) -> (Vec<ModInfo>, Vec<String>) {
         errs.push(format!("mods folder not found: {}", mods_dir.display()));
         return (out, errs);
     };
-    let mut dirs: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    let mut dirs: Vec<PathBuf> = rd
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
     dirs.sort();
     for d in dirs {
         let manifest = d.join("mod.toml");
-        let Ok(text) = fs::read_to_string(&manifest) else { continue };
+        let Ok(text) = fs::read_to_string(&manifest) else {
+            continue;
+        };
         match toml::from_str::<ModInfo>(&text) {
             Ok(mut m) => {
                 m.path = d.clone();
@@ -113,9 +125,17 @@ pub fn sort_mods(mods: Vec<ModInfo>) -> Result<Vec<ModInfo>, Vec<String>> {
     if !errs.is_empty() {
         return Err(errs);
     }
-    let pos: HashMap<String, usize> = mods.iter().enumerate().map(|(i, m)| (m.id.clone(), i)).collect();
+    let pos: HashMap<String, usize> = mods
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.id.clone(), i))
+        .collect();
     let before = |m: &ModInfo| -> Vec<usize> {
-        m.depends.iter().chain(m.load_after.iter()).filter_map(|d| pos.get(d).copied()).collect()
+        m.depends
+            .iter()
+            .chain(m.load_after.iter())
+            .filter_map(|d| pos.get(d).copied())
+            .collect()
     };
     let mut done = vec![false; mods.len()];
     let mut order = Vec::new();
@@ -127,13 +147,22 @@ pub fn sort_mods(mods: Vec<ModInfo>) -> Result<Vec<ModInfo>, Vec<String>> {
                 order.push(i);
             }
             None => {
-                let stuck: Vec<_> = (0..mods.len()).filter(|&i| !done[i]).map(|i| mods[i].id.clone()).collect();
-                return Err(vec![format!("dependency cycle between mods: {}", stuck.join(", "))]);
+                let stuck: Vec<_> = (0..mods.len())
+                    .filter(|&i| !done[i])
+                    .map(|i| mods[i].id.clone())
+                    .collect();
+                return Err(vec![format!(
+                    "dependency cycle between mods: {}",
+                    stuck.join(", ")
+                )]);
             }
         }
     }
     let mut slots: Vec<Option<ModInfo>> = mods.into_iter().map(Some).collect();
-    Ok(order.into_iter().map(|i| slots[i].take().unwrap()).collect())
+    Ok(order
+        .into_iter()
+        .map(|i| slots[i].take().unwrap())
+        .collect())
 }
 
 fn ron_files(dir: &Path) -> Vec<PathBuf> {
@@ -200,7 +229,13 @@ depends = [\"core\"]
 }
 
 /// Save RON text into a mod: `folder/<file>.ron`, or `<file>.ron` at the mod root.
-pub fn save_text_to_mod(mods_dir: &Path, mod_id: &str, folder: Option<&str>, file: &str, text: &str) -> Result<PathBuf, String> {
+pub fn save_text_to_mod(
+    mods_dir: &Path,
+    mod_id: &str,
+    folder: Option<&str>,
+    file: &str,
+    text: &str,
+) -> Result<PathBuf, String> {
     let mut dir = ensure_user_mod(mods_dir, mod_id)?;
     if let Some(f) = folder {
         dir = dir.join(f);
@@ -239,23 +274,36 @@ fn load_dir<T: DeserializeOwned + Def>(
     }
 }
 
-fn apply_patch<T: Serialize + DeserializeOwned + Def>(reg: &mut Registry<T>, id: &str, p: &Patch) -> Result<(), String> {
-    let cur = reg.get(id).ok_or(format!("patch target '{id}' not found"))?;
+fn apply_patch<T: Serialize + DeserializeOwned + Def>(
+    reg: &mut Registry<T>,
+    id: &str,
+    p: &Patch,
+) -> Result<(), String> {
+    let cur = reg
+        .get(id)
+        .ok_or(format!("patch target '{id}' not found"))?;
     let mut v = serde_json::to_value(cur).map_err(|e| e.to_string())?;
     let obj = v.as_object_mut().ok_or("def is not an object")?;
     for (k, val) in &p.set {
         obj.insert(k.clone(), val.clone());
     }
     for (k, val) in &p.append {
-        let arr = obj.entry(k.clone()).or_insert(serde_json::Value::Array(vec![]));
-        let arr = arr.as_array_mut().ok_or(format!("field '{k}' is not a list"))?;
+        let arr = obj
+            .entry(k.clone())
+            .or_insert(serde_json::Value::Array(vec![]));
+        let arr = arr
+            .as_array_mut()
+            .ok_or(format!("field '{k}' is not a list"))?;
         match val {
             serde_json::Value::Array(xs) => arr.extend(xs.iter().cloned()),
             x => arr.push(x.clone()),
         }
     }
     let new: T = serde_json::from_value(v).map_err(|e| format!("patch on '{id}': {e}"))?;
-    let src = reg.idx(id).map(|i| reg.source(i).to_string()).unwrap_or_default();
+    let src = reg
+        .idx(id)
+        .map(|i| reg.source(i).to_string())
+        .unwrap_or_default();
     reg.insert(new, &src);
     Ok(())
 }
@@ -263,8 +311,11 @@ fn apply_patch<T: Serialize + DeserializeOwned + Def>(reg: &mut Registry<T>, id:
 fn load_patches(m: &ModInfo, c: &mut Content, report: &mut LoadReport) {
     let dir = m.path.join("patches");
     let Ok(rd) = fs::read_dir(&dir) else { return };
-    let mut files: Vec<PathBuf> =
-        rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+    let mut files: Vec<PathBuf> = rd
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
     files.sort();
     for f in files {
         let text = fs::read_to_string(&f).unwrap_or_default();
@@ -277,7 +328,9 @@ fn load_patches(m: &ModInfo, c: &mut Content, report: &mut LoadReport) {
         };
         for p in patches {
             let Some((kind, id)) = p.target.split_once(':') else {
-                report.errors.push(format!("{}: bad target '{}'", f.display(), p.target));
+                report
+                    .errors
+                    .push(format!("{}: bad target '{}'", f.display(), p.target));
                 continue;
             };
             let r = match kind {
@@ -301,8 +354,11 @@ fn load_patches(m: &ModInfo, c: &mut Content, report: &mut LoadReport) {
 fn load_scripts(m: &ModInfo, host: &mut ScriptHost, report: &mut LoadReport) {
     let dir = m.path.join("scripts");
     let Ok(rd) = fs::read_dir(&dir) else { return };
-    let mut files: Vec<PathBuf> =
-        rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "rhai")).collect();
+    let mut files: Vec<PathBuf> = rd
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "rhai"))
+        .collect();
     files.sort();
     let mut merged: Option<AST> = None;
     for f in files {
@@ -377,7 +433,11 @@ pub fn load_all(mods_dir: &Path) -> (Content, ScriptHost, LoadReport) {
 
 /// Write an object def into a mod folder (used by the in-game editor).
 /// Creates the mod (with a `mod.toml` depending on `core`) if needed.
-pub fn save_object_to_mod(mods_dir: &Path, mod_id: &str, def: &ObjectDef) -> Result<PathBuf, String> {
+pub fn save_object_to_mod(
+    mods_dir: &Path,
+    mod_id: &str,
+    def: &ObjectDef,
+) -> Result<PathBuf, String> {
     let dir = mods_dir.join(mod_id);
     let objects = dir.join("objects");
     fs::create_dir_all(&objects).map_err(|e| e.to_string())?;

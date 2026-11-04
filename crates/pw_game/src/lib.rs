@@ -9,18 +9,18 @@ use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use pw_colony::{Colony, ColonyEvent, nearest_tile};
-use pw_life::{Life, LifeEnv, LifeEvent};
-use pw_tribe::{Founders, TribeEnv, TribeEvent, Tribes};
+use pw_colony::{Colony, ColonyEvent, NeedsEnv, nearest_tile};
 use pw_core::*;
+use pw_life::{Life, LifeEnv, LifeEvent};
 use pw_mods::ScriptHost;
 use pw_objects::{self as objs, ObjectEvent};
 use pw_sim::{SimEnv, SimSettings};
+use pw_tribe::{Founders, TribeEnv, TribeEvent, Tribes};
 use pw_world::*;
 use pw_worldgen::{GenPool, Generator};
 
-pub use pw_colony::TPS;
 pub use env::{Env, HOUR_TICKS, Light};
+pub use pw_colony::{Needs, TPS};
 pub use script::{ScriptCmd, ScriptCtx};
 
 /// Ticks in one in-game day.
@@ -88,12 +88,21 @@ pub struct Game {
 }
 
 impl Game {
-    pub fn new(content: Arc<Content>, mut scripts: ScriptHost, ext: Arc<Extensions>, seed: u64, mods_dir: PathBuf) -> Self {
+    pub fn new(
+        content: Arc<Content>,
+        mut scripts: ScriptHost,
+        ext: Arc<Extensions>,
+        seed: u64,
+        mods_dir: PathBuf,
+    ) -> Self {
         script::register_api(&mut scripts.engine);
         for f in &ext.script_setup {
             f(&mut scripts.engine);
         }
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 4);
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(2)
+            .clamp(1, 4);
         let mut g = Self {
             content,
             scripts,
@@ -127,7 +136,16 @@ impl Game {
         // Find a dry, open spot near the origin using terrain only.
         let mut spawn = TilePos::new(0, 0);
         'search: for r in 0..80 {
-            for (dx, dy) in [(r, 0), (-r, 0), (0, r), (0, -r), (r, r), (-r, -r), (r, -r), (-r, r)] {
+            for (dx, dy) in [
+                (r, 0),
+                (-r, 0),
+                (0, r),
+                (0, -r),
+                (r, r),
+                (-r, -r),
+                (r, -r),
+                (-r, r),
+            ] {
                 let t = TilePos::new(dx * 3, dy * 3);
                 let ok = (-2..=2).all(|ox| {
                     (-2..=2).all(|oy| {
@@ -162,19 +180,42 @@ impl Game {
             }
         }
         self.world.rebuild_tiles(&self.content);
-        if let Some(creature) = self.content.creatures.idx("core:colonist").or(if self.content.creatures.is_empty() { None } else { Some(0) }) {
+        if let Some(creature) =
+            self.content
+                .creatures
+                .idx("core:colonist")
+                .or(if self.content.creatures.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                })
+        {
             for i in 0..3 {
-                let t = nearest_tile(spawn.offset(i - 1, 0), 6, |t| self.world.walkable(t)).unwrap_or(spawn);
-                self.colony.spawn_pawn(&self.content, creature, t, &mut self.rng);
+                let t = nearest_tile(spawn.offset(i - 1, 0), 6, |t| self.world.walkable(t))
+                    .unwrap_or(spawn);
+                self.colony
+                    .spawn_pawn(&self.content, creature, t, &mut self.rng);
             }
         }
-        for (item, n) in [("core:wood", 60), ("core:berries", 30), ("core:stone", 20)] {
+        for (item, n) in [
+            ("core:wood", 60),
+            ("core:berries", 30),
+            ("core:meat", 10),
+            ("core:stone", 20),
+        ] {
             if let Some(i) = self.content.items.idx(item) {
-                self.colony.items.add(&self.world, &self.content, i, n, spawn.offset(0, -2));
+                self.colony
+                    .items
+                    .add(&self.world, &self.content, i, n, spawn.offset(0, -2));
             }
         }
         // Wild life around the landing site: rabbit warrens, a deer herd, and a wolf pack further out.
-        let groups = [("core:rabbit", 5, (8, 6)), ("core:rabbit", 5, (-9, 7)), ("core:deer", 5, (10, -9)), ("core:wolf", 3, (-18, -16))];
+        let groups = [
+            ("core:rabbit", 5, (8, 6)),
+            ("core:rabbit", 5, (-9, 7)),
+            ("core:deer", 5, (10, -9)),
+            ("core:wolf", 3, (-18, -16)),
+        ];
         for (id, n, (dx, dy)) in groups {
             self.spawn_group(id, spawn.offset(dx, dy), n);
         }
@@ -190,7 +231,11 @@ impl Game {
     }
 
     pub fn spawn_tile(&self) -> TilePos {
-        self.colony.pawns.first().map(|p| p.tile()).unwrap_or_default()
+        self.colony
+            .pawns
+            .first()
+            .map(|p| p.tile())
+            .unwrap_or_default()
     }
 
     pub fn message(&mut self, m: impl Into<String>) {
@@ -210,7 +255,9 @@ impl Game {
             if b.len() >= a.len() && a.iter().zip(&b).all(|(x, y)| x == y) {
                 Ok(())
             } else {
-                Err(format!("{what} were removed or reordered; start a new world to use this change"))
+                Err(format!(
+                    "{what} were removed or reordered; start a new world to use this change"
+                ))
             }
         };
         prefix("materials", old.materials.ids(), content.materials.ids())?;
@@ -253,9 +300,29 @@ impl Game {
         let content = self.content.clone();
         self.world.rebuild_tiles(&content);
         self.env.tick(&content.climate, self.tick, &mut self.rng);
-        let events = self.colony.tick(&mut self.world, &content, &mut self.rng, self.tick, self.env.walk_speed());
-        let sim_env = SimEnv { wet: self.env.wetness.max(self.env.precip * 0.8), wind: self.env.wind_vec(), temp: self.env.temp };
-        pw_sim::tick(&mut self.world, &content, &mut self.rng, &self.sim, &sim_env);
+        let needs_env = self.needs_env();
+        let mut events =
+            self.colony
+                .tick_needs(&mut self.world, &content, &mut self.rng, &needs_env);
+        events.extend(self.colony.tick(
+            &mut self.world,
+            &content,
+            &mut self.rng,
+            self.tick,
+            self.env.walk_speed(),
+        ));
+        let sim_env = SimEnv {
+            wet: self.env.wetness.max(self.env.precip * 0.8),
+            wind: self.env.wind_vec(),
+            temp: self.env.temp,
+        };
+        pw_sim::tick(
+            &mut self.world,
+            &content,
+            &mut self.rng,
+            &self.sim,
+            &sim_env,
+        );
         let mut obj_events = objs::process_damage(&mut self.world, &content);
         let life_env = LifeEnv {
             tick: self.tick,
@@ -264,7 +331,9 @@ impl Game {
             dark: self.light().dark,
             walk: self.env.walk_speed(),
         };
-        let life_events = self.life.tick(&mut self.world, &content, &mut self.rng, &life_env);
+        let life_events = self
+            .life
+            .tick(&mut self.world, &content, &mut self.rng, &life_env);
         self.handle_life(life_events);
         let tribe_env = TribeEnv {
             tick: self.tick,
@@ -273,13 +342,25 @@ impl Game {
             walk: life_env.walk,
             keep_out: vec![(self.home, 14)],
         };
-        let tribe_events = self.tribes.tick(&mut self.world, &content, &mut self.rng, &tribe_env, &mut self.life);
+        let tribe_events = self.tribes.tick(
+            &mut self.world,
+            &content,
+            &mut self.rng,
+            &tribe_env,
+            &mut self.life,
+        );
         self.handle_tribes(tribe_events);
         if self.tick % DAY_TICKS == DAY_TICKS / 2 {
             self.migrate();
         }
         let growth = self.env.growth(&content.climate, self.tick);
-        obj_events.extend(objs::tick_life(&mut self.world, &content, self.tick, &mut self.rng, growth));
+        obj_events.extend(objs::tick_life(
+            &mut self.world,
+            &content,
+            self.tick,
+            &mut self.rng,
+            growth,
+        ));
         if self.tick % 30 == 0 {
             self.collapse_roofs();
         }
@@ -287,19 +368,32 @@ impl Game {
 
         for e in events {
             match e {
-                ColonyEvent::Destroyed { def, center } => self.run_hook(def, "on_destroyed", center),
-                ColonyEvent::Harvested { def, center } => self.run_hook(def, "on_harvested", center),
+                ColonyEvent::Destroyed { def, center } => {
+                    self.run_hook(def, "on_destroyed", center)
+                }
+                ColonyEvent::Harvested { def, center } => {
+                    self.run_hook(def, "on_harvested", center)
+                }
                 ColonyEvent::Built { def, center, .. } => {
                     let name = content.objects.by_idx(def).name.clone();
                     self.message(format!("Built {name}."));
                     self.run_hook(def, "on_built", center)
                 }
                 ColonyEvent::Message(m) => self.message(m),
+                ColonyEvent::Died { name, cause, .. } => {
+                    self.message(format!("{name} {cause} to death."));
+                    self.fire_event("on_colonist_died", vec![name.into(), cause.into()]);
+                }
             }
+        }
+        if self.tick % DAY_TICKS == DAY_TICKS / 4 {
+            self.food_warning();
         }
         for e in obj_events {
             match e {
-                ObjectEvent::Destroyed { def, center, .. } => self.run_hook(def, "on_destroyed", center),
+                ObjectEvent::Destroyed { def, center, .. } => {
+                    self.run_hook(def, "on_destroyed", center)
+                }
                 ObjectEvent::Grown { def, center } => self.run_hook(def, "on_grown", center),
                 ObjectEvent::Built { def, center, .. } => self.run_hook(def, "on_built", center),
             }
@@ -342,25 +436,43 @@ impl Game {
     fn collapse_roofs(&mut self) {
         let content = self.content.clone();
         // Roofs still under construction are left alone.
-        let mut building: HashSet<ObjId> = self.colony.blueprints.values().filter_map(|b| b.obj).collect();
+        let mut building: HashSet<ObjId> = self
+            .colony
+            .blueprints
+            .values()
+            .filter_map(|b| b.obj)
+            .collect();
         for t in &self.tribes.list {
             building.extend(t.colony.blueprints.values().filter_map(|b| b.obj));
         }
-        let fallen: Vec<_> = objs::unsupported_roofs(&self.world, &content).into_iter().filter(|r| !building.contains(&r.0)).collect();
+        let fallen: Vec<_> = objs::unsupported_roofs(&self.world, &content)
+            .into_iter()
+            .filter(|r| !building.contains(&r.0))
+            .collect();
         if fallen.is_empty() {
             return;
         }
         for &(id, def, tile) in &fallen {
-            if let Some(ObjectEvent::Destroyed { center, .. }) = objs::destroy(&mut self.world, &content, id) {
+            if let Some(ObjectEvent::Destroyed { center, .. }) =
+                objs::destroy(&mut self.world, &content, id)
+            {
                 if let Some(b) = &content.protos[def].build {
                     for &(item, n) in &b.cost {
                         let back = n / 2;
                         if back > 0 {
                             // Back to whoever owns the land.
                             let owner = self.tribes.land_at(tile).map(|t| t.id);
-                            match owner.and_then(|id| self.tribes.list.iter_mut().find(|t| t.id == id)) {
-                                Some(t) => t.colony.items.add(&self.world, &content, item, back, tile),
-                                None => self.colony.items.add(&self.world, &content, item, back, tile),
+                            match owner
+                                .and_then(|id| self.tribes.list.iter_mut().find(|t| t.id == id))
+                            {
+                                Some(t) => {
+                                    t.colony.items.add(&self.world, &content, item, back, tile)
+                                }
+                                None => {
+                                    self.colony
+                                        .items
+                                        .add(&self.world, &content, item, back, tile)
+                                }
                             }
                         }
                     }
@@ -368,7 +480,10 @@ impl Game {
                 self.run_hook(def, "on_destroyed", center);
             }
         }
-        self.message(format!("{} roof tile(s) collapsed: no wall or rock close enough to hold them up.", fallen.len()));
+        self.message(format!(
+            "{} roof tile(s) collapsed: no wall or rock close enough to hold them up.",
+            fallen.len()
+        ));
     }
 
     /// Year, season name, day of season, hour.
@@ -378,11 +493,63 @@ impl Game {
 
     pub fn season_name(&self) -> &str {
         let c = self.calendar();
-        self.content.climate.seasons.get(c.season).map(|s| s.name.as_str()).unwrap_or("")
+        self.content
+            .climate
+            .seasons
+            .get(c.season)
+            .map(|s| s.name.as_str())
+            .unwrap_or("")
     }
 
     pub fn light(&self) -> Light {
         env::light(&self.content.climate, self.tick, self.env.clouds)
+    }
+
+    /// What colonist needs depend on right now.
+    pub fn needs_env(&self) -> NeedsEnv {
+        NeedsEnv {
+            tick: self.tick,
+            day_ticks: DAY_TICKS,
+            dark: self.light().dark,
+            temp: self.env.temp,
+            wind: self.env.wind,
+            wet: self.env.precip,
+            keep_out: self
+                .tribes
+                .living()
+                .map(|t| (t.center, t.radius as i32 + 2))
+                .collect(),
+        }
+    }
+
+    /// Meals in store: total nutrition of all food the colony has.
+    pub fn meals(&self) -> f32 {
+        self.colony
+            .items
+            .stacks
+            .values()
+            .map(|s| self.content.items.by_idx(s.item).nutrition * s.count as f32)
+            .sum()
+    }
+
+    /// Once a day: say so when food runs short.
+    fn food_warning(&mut self) {
+        let eaters: f32 = self
+            .colony
+            .pawns
+            .iter()
+            .filter_map(|p| self.content.creatures.by_idx(p.creature).needs.as_ref())
+            .map(|n| 1.0 / n.food_days.max(0.05))
+            .sum();
+        if eaters <= 0.0 {
+            return;
+        }
+        let days = self.meals() / eaters;
+        if days < 2.0 {
+            self.message(format!(
+                "Food is running low: about {days:.1} days left. Mark berry bushes to harvest."
+            ));
+        }
     }
 
     pub fn day_time(&self) -> (u64, u32, u32) {
@@ -409,23 +576,46 @@ impl Game {
             let (cx, cy) = ((a.x + b.x) / 2, (a.y + b.y) / 2);
             let a = ChunkPos::new(a.x.max(cx - 9), a.y.max(cy - 6));
             let b = ChunkPos::new(b.x.min(cx + 9), b.y.min(cy + 6));
-            add_box(&mut needed, ChunkPos::new(a.x - 1, a.y - 1), ChunkPos::new(b.x + 1, b.y + 1));
+            add_box(
+                &mut needed,
+                ChunkPos::new(a.x - 1, a.y - 1),
+                ChunkPos::new(b.x + 1, b.y + 1),
+            );
         }
         for p in &self.colony.pawns {
             let c = p.tile().chunk();
-            add_box(&mut needed, ChunkPos::new(c.x - 1, c.y - 1), ChunkPos::new(c.x + 1, c.y + 1));
+            add_box(
+                &mut needed,
+                ChunkPos::new(c.x - 1, c.y - 1),
+                ChunkPos::new(c.x + 1, c.y + 1),
+            );
         }
         // Tribes keep their land (and wherever their people roam) alive.
         for t in self.tribes.living() {
             let c = t.center.chunk();
-            add_box(&mut needed, ChunkPos::new(c.x - 1, c.y - 1), ChunkPos::new(c.x + 1, c.y + 1));
+            add_box(
+                &mut needed,
+                ChunkPos::new(c.x - 1, c.y - 1),
+                ChunkPos::new(c.x + 1, c.y + 1),
+            );
             for p in &t.colony.pawns {
                 let c = p.tile().chunk();
-                add_box(&mut needed, ChunkPos::new(c.x - 1, c.y - 1), ChunkPos::new(c.x + 1, c.y + 1));
+                add_box(
+                    &mut needed,
+                    ChunkPos::new(c.x - 1, c.y - 1),
+                    ChunkPos::new(c.x + 1, c.y + 1),
+                );
             }
         }
-        let mut want: Vec<ChunkPos> = needed.iter().copied().filter(|c| !self.world.chunks.contains_key(c)).collect();
-        let center = self.view.map(|(a, b)| ((a.x + b.x) / 2, (a.y + b.y) / 2)).unwrap_or((0, 0));
+        let mut want: Vec<ChunkPos> = needed
+            .iter()
+            .copied()
+            .filter(|c| !self.world.chunks.contains_key(c))
+            .collect();
+        let center = self
+            .view
+            .map(|(a, b)| ((a.x + b.x) / 2, (a.y + b.y) / 2))
+            .unwrap_or((0, 0));
         want.sort_by_key(|c| (c.x - center.0).abs() + (c.y - center.1).abs());
         for c in want {
             self.pool.request(c, self.seed, self.content.clone());
@@ -436,8 +626,18 @@ impl Game {
             }
         }
         // Unload far, untouched chunks (they regenerate identically).
-        let keep = |c: &ChunkPos| needed.iter().any(|n| (n.x - c.x).abs() <= 2 && (n.y - c.y).abs() <= 2);
-        let drop: Vec<ChunkPos> = self.world.chunks.iter().filter(|(c, ch)| !ch.modified && !keep(c)).map(|(c, _)| *c).collect();
+        let keep = |c: &ChunkPos| {
+            needed
+                .iter()
+                .any(|n| (n.x - c.x).abs() <= 2 && (n.y - c.y).abs() <= 2)
+        };
+        let drop: Vec<ChunkPos> = self
+            .world
+            .chunks
+            .iter()
+            .filter(|(c, ch)| !ch.modified && !keep(c))
+            .map(|(c, _)| *c)
+            .collect();
         for c in drop {
             self.world.chunks.remove(&c);
         }
@@ -465,7 +665,10 @@ impl Game {
         self.seed = seed;
         self.tick = tick;
         self.rng = rng;
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 4);
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(2)
+            .clamp(1, 4);
         self.pool = GenPool::new(threads);
         self.world.rebuild_tiles(&self.content.clone());
     }
@@ -477,9 +680,12 @@ impl Game {
     // ------------------------------------------------------------ player tools
 
     pub fn designate(&mut self, job: &str, rect: TileRect, plant: Option<&str>) -> usize {
-        let Some(j) = self.content.jobs.idx(job) else { return 0 };
+        let Some(j) = self.content.jobs.idx(job) else {
+            return 0;
+        };
         let plant = plant.and_then(|p| self.content.objects.idx(p));
-        self.colony.designate(&self.world, &self.content, j, rect, plant)
+        self.colony
+            .designate(&self.world, &self.content, j, rect, plant)
     }
 
     pub fn cancel(&mut self, rect: TileRect) {
@@ -493,17 +699,29 @@ impl Game {
 
     /// Place blueprints. Walls (tag `wall`) are drawn as a room outline; everything else fills the area.
     pub fn build(&mut self, def: &str, rect: TileRect) -> usize {
-        let Some(d) = self.content.objects.idx(def) else { return 0 };
-        let outline = self.content.protos[d].has_tag("wall") && rect.width() > 2 && rect.height() > 2;
+        let Some(d) = self.content.objects.idx(def) else {
+            return 0;
+        };
+        let outline =
+            self.content.protos[d].has_tag("wall") && rect.width() > 2 && rect.height() > 2;
         let mut n = 0;
         let tiles: Vec<TilePos> = rect
             .iter()
-            .filter(|t| !outline || t.x == rect.min.x || t.x == rect.max.x || t.y == rect.min.y || t.y == rect.max.y)
+            .filter(|t| {
+                !outline
+                    || t.x == rect.min.x
+                    || t.x == rect.max.x
+                    || t.y == rect.min.y
+                    || t.y == rect.max.y
+            })
             .collect();
         self.last_build_error = None;
         for t in tiles {
             let seed = hash2(self.seed, t.x as i64, t.y as i64);
-            match self.colony.place_blueprint(&self.world, &self.content, d, t, seed) {
+            match self
+                .colony
+                .place_blueprint(&self.world, &self.content, d, t, seed)
+            {
                 Ok(()) => n += 1,
                 Err(e) => self.last_build_error = Some(e),
             }
@@ -513,7 +731,9 @@ impl Game {
 
     /// God tool: paint particles in a disc.
     pub fn paint(&mut self, cx: i32, cy: i32, radius: i32, layer: Layer, mat: &str) {
-        let Some(m) = self.content.mat(mat) else { return };
+        let Some(m) = self.content.mat(mat) else {
+            return;
+        };
         let content = self.content.clone();
         for y in -radius..=radius {
             for x in -radius..=radius {
@@ -526,7 +746,9 @@ impl Game {
 
     /// God tool: drop an object anywhere (ignores placement rules except loaded ground).
     pub fn place_object(&mut self, def: &str, x: i32, y: i32) -> bool {
-        let Some(d) = self.content.objects.idx(def) else { return false };
+        let Some(d) = self.content.objects.idx(def) else {
+            return false;
+        };
         if !self.world.is_loaded(x, y) {
             return false;
         }
@@ -542,7 +764,9 @@ impl Game {
     /// Use a god power (from `powers/` data) centred on a particle.
     pub fn use_power(&mut self, id: &str, cx: i32, cy: i32, radius: i32) -> bool {
         let content = self.content.clone();
-        let Some(pi) = content.powers.idx(id) else { return false };
+        let Some(pi) = content.powers.idx(id) else {
+            return false;
+        };
         let power = content.powers.by_idx(pi).clone();
         let owner = content.powers.source(pi).to_string();
         let radius = radius.max(0);
@@ -551,7 +775,13 @@ impl Game {
         let flammable = content.mat_mask("tag:flammable").unwrap_or_default();
         for effect in &power.effects {
             match effect {
-                PowerEffect::Paint { layer, set, chance, onto, ring } => {
+                PowerEffect::Paint {
+                    layer,
+                    set,
+                    chance,
+                    onto,
+                    ring,
+                } => {
                     let Some(m) = content.mat(set) else {
                         self.message(format!("Power {id}: unknown material '{set}'"));
                         continue;
@@ -561,7 +791,10 @@ impl Game {
                     for y in -reach..=reach {
                         for x in -reach..=reach {
                             let d = ((x * x + y * y) as f32).sqrt() / rf;
-                            if d < ring.0 || d > ring.1 || (*chance < 1.0 && !self.rng.chance(*chance)) {
+                            if d < ring.0
+                                || d > ring.1
+                                || (*chance < 1.0 && !self.rng.chance(*chance))
+                            {
                                 continue;
                             }
                             let (px, py) = (cx + x, cy + y);
@@ -587,7 +820,9 @@ impl Game {
                             let (px, py) = (cx + x, cy + y);
                             for l in [Layer::Overlay, Layer::Solid, Layer::Floor] {
                                 let m = self.world.get(px, py, l);
-                                if m != NONE_MAT && flammable.get(m as usize).copied().unwrap_or(false) {
+                                if m != NONE_MAT
+                                    && flammable.get(m as usize).copied().unwrap_or(false)
+                                {
                                     self.world.set(&content, px, py, l, fire, NO_OBJ);
                                     break;
                                 }
@@ -626,9 +861,15 @@ impl Game {
                     }
                 }
                 PowerEffect::Script { function } => self.call_script(&owner, function, (cx, cy)),
-                PowerEffect::Flash => self.flashes.push((cx as f32, cy as f32, rf.max(4.0) * 2.5, self.tick)),
+                PowerEffect::Flash => {
+                    self.flashes
+                        .push((cx as f32, cy as f32, rf.max(4.0) * 2.5, self.tick))
+                }
                 PowerEffect::Tribe { tribe, members } => {
-                    if self.found_tribe(tribe, Some(tile_of(cx, cy)), *members).is_none() {
+                    if self
+                        .found_tribe(tribe, Some(tile_of(cx, cy)), *members)
+                        .is_none()
+                    {
                         self.message("No room for a tribe there.");
                     }
                 }
@@ -646,11 +887,18 @@ impl Game {
 
     /// Spawn any creature by id: wild animals join the wild, colonists the colony.
     pub fn spawn_creature(&mut self, id: &str, t: TilePos) -> bool {
-        let Some(c) = self.content.creatures.idx(id) else { return false };
-        let Some(t) = nearest_tile(t, 3, |t| self.world.walkable(t)) else { return false };
+        let Some(c) = self.content.creatures.idx(id) else {
+            return false;
+        };
+        let Some(t) = nearest_tile(t, 3, |t| self.world.walkable(t)) else {
+            return false;
+        };
         if self.content.creatures.by_idx(c).life.is_some() {
             let content = self.content.clone();
-            return self.life.spawn(&content, c, t, &mut self.rng, self.tick, DAY_TICKS).is_some();
+            return self
+                .life
+                .spawn(&content, c, t, &mut self.rng, self.tick, DAY_TICKS)
+                .is_some();
         }
         self.colony.spawn_pawn(&self.content, c, t, &mut self.rng);
         true
@@ -675,7 +923,9 @@ impl Game {
         let content = self.content.clone();
         for e in events {
             match e {
-                LifeEvent::Died { def, pos, cause, .. } => {
+                LifeEvent::Died {
+                    def, pos, cause, ..
+                } => {
                     // Burnt to nothing, or already carried off by hunters.
                     if cause == pw_life::Death::Burnt || cause == pw_life::Death::Hunted {
                         continue;
@@ -690,8 +940,12 @@ impl Game {
                         }
                         for (item, n) in &life.remains {
                             if let Some(i) = content.items.idx(item) {
-                                match owner.and_then(|id| self.tribes.list.iter_mut().find(|tr| tr.id == id)) {
-                                    Some(tr) => tr.colony.items.add(&self.world, &content, i, *n, t),
+                                match owner.and_then(|id| {
+                                    self.tribes.list.iter_mut().find(|tr| tr.id == id)
+                                }) {
+                                    Some(tr) => {
+                                        tr.colony.items.add(&self.world, &content, i, *n, t)
+                                    }
                                     None => self.colony.items.add(&self.world, &content, i, *n, t),
                                 }
                             }
@@ -699,7 +953,9 @@ impl Game {
                     }
                 }
                 LifeEvent::NewSpecies { name, from, .. } => {
-                    self.message(format!("A new species has appeared: {name}, evolved from {from}."));
+                    self.message(format!(
+                        "A new species has appeared: {name}, evolved from {from}."
+                    ));
                     self.fire_event("on_new_species", vec![name.into()]);
                 }
                 LifeEvent::Extinct { name } => {
@@ -721,23 +977,52 @@ impl Game {
         };
         self.prepare_site(site);
         let content = self.content.clone();
-        let id = self.tribes.found(&mut self.world, &content, &mut self.rng, def_id, site, self.tick, DAY_TICKS, Founders::New(members))?;
-        let name = self.tribes.get(id).map(|t| t.name.clone()).unwrap_or_default();
-        let kind = content.tribes.get(def_id).map(|d| d.name.to_lowercase()).unwrap_or_default();
+        let id = self.tribes.found(
+            &mut self.world,
+            &content,
+            &mut self.rng,
+            def_id,
+            site,
+            self.tick,
+            DAY_TICKS,
+            Founders::New(members),
+        )?;
+        let name = self
+            .tribes
+            .get(id)
+            .map(|t| t.name.clone())
+            .unwrap_or_default();
+        let kind = content
+            .tribes
+            .get(def_id)
+            .map(|d| d.name.to_lowercase())
+            .unwrap_or_default();
         self.message(format!("The {name}, {kind}, have settled nearby."));
         self.fire_event("on_tribe_founded", vec![name.into()]);
         Some(id)
     }
 
     /// Dry, open land for a village between `min` and `max` tiles from `around`.
-    fn tribe_site(&mut self, around: TilePos, min: i32, max: i32, keep_apart: bool) -> Option<TilePos> {
+    fn tribe_site(
+        &mut self,
+        around: TilePos,
+        min: i32,
+        max: i32,
+        keep_apart: bool,
+    ) -> Option<TilePos> {
         let generator = Generator::new(self.seed, &self.content);
         let centers: Vec<TilePos> = self.tribes.living().map(|t| t.center).collect();
         for attempt in 0..60 {
             let a = self.rng.f32() * std::f32::consts::TAU;
-            let d = if max <= min { min as f32 } else { self.rng.range_f32(min as f32, max as f32) } + (attempt / 20) as f32 * 4.0;
+            let d = if max <= min {
+                min as f32
+            } else {
+                self.rng.range_f32(min as f32, max as f32)
+            } + (attempt / 20) as f32 * 4.0;
             let t = around.offset((a.cos() * d).round() as i32, (a.sin() * d).round() as i32);
-            if keep_apart && (t.chebyshev(self.home) < 34 || centers.iter().any(|c| c.chebyshev(t) < 30)) {
+            if keep_apart
+                && (t.chebyshev(self.home) < 34 || centers.iter().any(|c| c.chebyshev(t) < 30))
+            {
                 continue;
             }
             let open = (-2..=2).all(|ox| {
@@ -746,7 +1031,11 @@ impl Game {
                     if self.world.chunk(tt.chunk()).is_some() {
                         // Plants can be cleared; rock, water and buildings cannot.
                         return self.world.walkable(tt)
-                            || self.world.objects_in_tile(tt).iter().any(|&o| self.world.objects.get(o).is_some_and(|i| !i.built));
+                            || self
+                                .world
+                                .objects_in_tile(tt)
+                                .iter()
+                                .any(|&o| self.world.objects.get(o).is_some_and(|i| !i.built));
                     }
                     let (x, y) = tt.center();
                     let ter = generator.terrain_at(&self.content, x as i32, y as i32);
@@ -763,7 +1052,10 @@ impl Game {
     /// Load a village site and clear a little room around its centre.
     fn prepare_site(&mut self, site: TilePos) {
         let c = site.chunk();
-        self.load_chunks_now(ChunkPos::new(c.x - 1, c.y - 1), ChunkPos::new(c.x + 1, c.y + 1));
+        self.load_chunks_now(
+            ChunkPos::new(c.x - 1, c.y - 1),
+            ChunkPos::new(c.x + 1, c.y + 1),
+        );
         let content = self.content.clone();
         for t in TileRect::from_corners(site.offset(-2, -2), site.offset(4, 2)).iter() {
             for o in self.world.objects_in_tile(t) {
@@ -779,12 +1071,20 @@ impl Game {
         let content = self.content.clone();
         for e in events {
             match e {
-                TribeEvent::Colony(ColonyEvent::Built { def, center, .. }) => self.run_hook(def, "on_built", center),
-                TribeEvent::Colony(ColonyEvent::Destroyed { def, center }) => self.run_hook(def, "on_destroyed", center),
-                TribeEvent::Colony(ColonyEvent::Harvested { def, center }) => self.run_hook(def, "on_harvested", center),
-                TribeEvent::Colony(ColonyEvent::Message(_)) => {}
+                TribeEvent::Colony(ColonyEvent::Built { def, center, .. }) => {
+                    self.run_hook(def, "on_built", center)
+                }
+                TribeEvent::Colony(ColonyEvent::Destroyed { def, center }) => {
+                    self.run_hook(def, "on_destroyed", center)
+                }
+                TribeEvent::Colony(ColonyEvent::Harvested { def, center }) => {
+                    self.run_hook(def, "on_harvested", center)
+                }
+                TribeEvent::Colony(ColonyEvent::Message(_) | ColonyEvent::Died { .. }) => {}
                 TribeEvent::Message(m) => self.message(m),
-                TribeEvent::Founded { name } => self.fire_event("on_tribe_founded", vec![name.into()]),
+                TribeEvent::Founded { name } => {
+                    self.fire_event("on_tribe_founded", vec![name.into()])
+                }
                 TribeEvent::Discovered { tribe, tech } => {
                     self.message(format!("The {tribe} have discovered {tech}."));
                     self.fire_event("on_discovery", vec![tribe.into(), tech.into()]);
@@ -793,23 +1093,54 @@ impl Game {
                     self.message(format!("The {name} are no more."));
                     self.fire_event("on_tribe_lost", vec![name.into()]);
                 }
-                TribeEvent::Split { from, pawns, members, food } => {
-                    let Some(parent) = self.tribes.get(from) else { continue };
-                    let (pc, def_id, pname) = (parent.center, parent.def_id.clone(), parent.name.clone());
+                TribeEvent::Split {
+                    from,
+                    pawns,
+                    members,
+                    food,
+                } => {
+                    let Some(parent) = self.tribes.get(from) else {
+                        continue;
+                    };
+                    let (pc, def_id, pname) =
+                        (parent.center, parent.def_id.clone(), parent.name.clone());
                     let wander = parent.traits[pw_tribe::T_WANDER];
                     let (lo, hi) = ((30.0 * wander) as i32, (55.0 * wander) as i32);
                     let n = pawns.len();
                     match self.tribe_site(pc, lo.max(26), hi.max(34), true) {
                         Some(site) => {
                             self.prepare_site(site);
-                            let founders = Founders::Band { parent: from, pawns, members, food };
-                            if let Some(id) = self.tribes.found(&mut self.world, &content, &mut self.rng, &def_id, site, self.tick, DAY_TICKS, founders) {
-                                let name = self.tribes.get(id).map(|t| t.name.clone()).unwrap_or_default();
-                                self.message(format!("{n} people left the {pname} and founded the {name}."));
+                            let founders = Founders::Band {
+                                parent: from,
+                                pawns,
+                                members,
+                                food,
+                            };
+                            if let Some(id) = self.tribes.found(
+                                &mut self.world,
+                                &content,
+                                &mut self.rng,
+                                &def_id,
+                                site,
+                                self.tick,
+                                DAY_TICKS,
+                                founders,
+                            ) {
+                                let name = self
+                                    .tribes
+                                    .get(id)
+                                    .map(|t| t.name.clone())
+                                    .unwrap_or_default();
+                                self.message(format!(
+                                    "{n} people left the {pname} and founded the {name}."
+                                ));
                                 self.fire_event("on_tribe_founded", vec![name.into()]);
                             }
                         }
-                        None => self.tribes.rejoin(from, pawns, members, food, &self.world, &content),
+                        None => {
+                            self.tribes
+                                .rejoin(from, pawns, members, food, &self.world, &content)
+                        }
                     }
                 }
             }
@@ -818,25 +1149,39 @@ impl Game {
 
     /// Every person in the world: (owner, pawn). Owner 0 is the player's colony, else a tribe id.
     pub fn all_pawns(&self) -> impl Iterator<Item = (u32, &pw_colony::Pawn)> {
-        self.colony.pawns.iter().map(|p| (0, p)).chain(self.tribes.living().flat_map(|t| t.colony.pawns.iter().map(move |p| (t.id, p))))
+        self.colony.pawns.iter().map(|p| (0, p)).chain(
+            self.tribes
+                .living()
+                .flat_map(|t| t.colony.pawns.iter().map(move |p| (t.id, p))),
+        )
     }
 
     /// Every item stack on the ground: (owner, stack).
     pub fn all_items(&self) -> impl Iterator<Item = (u32, &pw_colony::ItemStack)> {
-        self.colony
-            .items
-            .stacks
-            .values()
-            .map(|s| (0, s))
-            .chain(self.tribes.list.iter().flat_map(|t| t.colony.items.stacks.values().map(move |s| (t.id, s))))
+        self.colony.items.stacks.values().map(|s| (0, s)).chain(
+            self.tribes
+                .list
+                .iter()
+                .flat_map(|t| t.colony.items.stacks.values().map(move |s| (t.id, s))),
+        )
     }
 
     /// A tribe person near a point.
-    pub fn tribe_pawn_at(&self, p: (f32, f32), reach: f32) -> Option<(&pw_tribe::Tribe, &pw_colony::Pawn)> {
+    pub fn tribe_pawn_at(
+        &self,
+        p: (f32, f32),
+        reach: f32,
+    ) -> Option<(&pw_tribe::Tribe, &pw_colony::Pawn)> {
         self.tribes
             .living()
             .flat_map(|t| t.colony.pawns.iter().map(move |pw| (t, pw)))
-            .map(|(t, pw)| (((pw.pos.0 - p.0).powi(2) + (pw.pos.1 - p.1).powi(2)).sqrt(), t, pw))
+            .map(|(t, pw)| {
+                (
+                    ((pw.pos.0 - p.0).powi(2) + (pw.pos.1 - p.1).powi(2)).sqrt(),
+                    t,
+                    pw,
+                )
+            })
             .filter(|x| x.0 <= reach)
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|x| (x.1, x.2))
@@ -845,10 +1190,18 @@ impl Game {
     /// Lines describing a tribe person.
     pub fn describe_tribe_pawn(&self, t: &pw_tribe::Tribe, p: &pw_colony::Pawn) -> Vec<String> {
         let night = self.light().dark > 0.62;
-        let mut out = vec![format!("{} of the {} - {}", p.name, t.name, t.activity(p, night))];
+        let mut out = vec![format!(
+            "{} of the {} - {}",
+            p.name,
+            t.name,
+            t.activity(p, night)
+        )];
         if let Some(m) = t.member(p.id) {
             let age = m.age as f32 / DAY_TICKS as f32;
-            out.push(format!("{age:.0} days old{}", if m.hunger > 0 { ", hungry" } else { "" }));
+            out.push(format!(
+                "{age:.0} days old{}",
+                if m.hunger > 0 { ", hungry" } else { "" }
+            ));
         }
         out
     }
@@ -856,7 +1209,9 @@ impl Game {
     /// Animals that died out locally wander back in from the wilds.
     fn migrate(&mut self) {
         let content = self.content.clone();
-        let Some(home) = self.colony.pawns.first().map(|p| p.tile()) else { return };
+        let Some(home) = self.colony.pawns.first().map(|p| p.tile()) else {
+            return;
+        };
         for (i, d) in content.creatures.iter() {
             let Some(life) = &d.life else { continue };
             if !life.migrates || self.life.count_def(i) >= 3 {
@@ -873,7 +1228,9 @@ impl Game {
 
     /// God tool: start a fire.
     pub fn ignite(&mut self, cx: i32, cy: i32, radius: i32) {
-        let Some(fire) = self.content.mat("core:fire") else { return };
+        let Some(fire) = self.content.mat("core:fire") else {
+            return;
+        };
         let content = self.content.clone();
         for y in -radius..=radius {
             for x in -radius..=radius {
@@ -932,9 +1289,16 @@ impl Game {
             }
         }
         if let Some(c) = self.life.at((px as f32, py as f32), 6.0) {
-            let sp = self.life.species_of(c.species).map(|s| s.name.clone()).unwrap_or_default();
+            let sp = self
+                .life
+                .species_of(c.species)
+                .map(|s| s.name.clone())
+                .unwrap_or_default();
             let days = c.age as f32 / DAY_TICKS as f32;
-            out.push(format!("{sp}, {days:.1} days old, generation {}", c.generation));
+            out.push(format!(
+                "{sp}, {days:.1} days old, generation {}",
+                c.generation
+            ));
             out.push(format!("{} - energy {:.0}", c.activity(), c.energy));
         }
         if let Some((tr, p)) = self.tribe_pawn_at((px as f32, py as f32), 6.0) {
@@ -944,8 +1308,20 @@ impl Game {
             out.push(format!("Land of the {}", tr.name));
         }
         if let Some(info) = self.world.tile(t) {
-            out.push(if info.walkable { format!("Walkable, cost {:.1}", info.cost) } else { "Blocked".into() });
+            out.push(if info.walkable {
+                format!("Walkable, cost {:.1}", info.cost)
+            } else {
+                "Blocked".into()
+            });
         }
+        let ne = self.needs_env();
+        let felt = pw_colony::felt_temp(&self.world, c, t, &ne);
+        let roof = if pw_colony::roofed(&self.world, c, t) {
+            ", under a roof"
+        } else {
+            ""
+        };
+        out.push(format!("Feels like {felt:.0} C{roof}"));
         if let Some(s) = self.colony.items.at(t) {
             out.push(format!("{} x{}", c.items.by_idx(s.item).name, s.count));
         }
@@ -962,7 +1338,9 @@ impl Game {
 
     /// Call an object's script hook (`on_destroyed`, ...) with (ctx, x, y).
     pub fn run_hook(&mut self, def: usize, hook: &str, center: (i32, i32)) {
-        let Some(name) = self.content.protos[def].hooks.get(hook).cloned() else { return };
+        let Some(name) = self.content.protos[def].hooks.get(hook).cloned() else {
+            return;
+        };
         let owner = self.content.objects.source(def).to_string();
         self.call_script(&owner, &name, center);
     }
@@ -973,7 +1351,11 @@ impl Game {
             return;
         };
         let fname = ScriptHost::fn_name(name).to_string();
-        self.run_script(&ast, &fname, vec![(at.0 as i64).into(), (at.1 as i64).into()]);
+        self.run_script(
+            &ast,
+            &fname,
+            vec![(at.0 as i64).into(), (at.1 as i64).into()],
+        );
     }
 
     /// What scripts can read about the world right now.
@@ -981,13 +1363,22 @@ impl Game {
         let cal = self.calendar();
         let mut counts: std::collections::HashMap<String, i64> = Default::default();
         for c in &self.life.creatures {
-            *counts.entry(self.content.creatures.by_idx(c.def).id.clone()).or_insert(0) += 1;
+            *counts
+                .entry(self.content.creatures.by_idx(c.def).id.clone())
+                .or_insert(0) += 1;
         }
         for (_, p) in self.all_pawns() {
-            *counts.entry(self.content.creatures.by_idx(p.creature).id.clone()).or_insert(0) += 1;
+            *counts
+                .entry(self.content.creatures.by_idx(p.creature).id.clone())
+                .or_insert(0) += 1;
         }
         counts.insert("tribes".into(), self.tribes.alive() as i64);
-        let colony = self.colony.pawns.first().map(|p| (p.pos.0 as i32, p.pos.1 as i32)).unwrap_or((0, 0));
+        let colony = self
+            .colony
+            .pawns
+            .first()
+            .map(|p| (p.pos.0 as i32, p.pos.1 as i32))
+            .unwrap_or((0, 0));
         script::WorldInfo {
             temp: self.env.temp,
             season: self.season_name().to_string(),
@@ -1008,7 +1399,10 @@ impl Game {
             .scripts
             .asts
             .values()
-            .filter(|a| a.iter_functions().any(|f| f.name == event && f.params.len() == arity))
+            .filter(|a| {
+                a.iter_functions()
+                    .any(|f| f.name == event && f.params.len() == arity)
+            })
             .cloned()
             .collect();
         for ast in asts {
@@ -1022,7 +1416,10 @@ impl Game {
         let ctx = ScriptCtx::with_info(world, self.content.clone(), self.rng.next_u64(), info);
         let mut all: Vec<rhai::Dynamic> = vec![rhai::Dynamic::from(ctx.clone())];
         all.extend(args);
-        let result = self.scripts.engine.call_fn::<rhai::Dynamic>(&mut rhai::Scope::new(), ast, name, all);
+        let result =
+            self.scripts
+                .engine
+                .call_fn::<rhai::Dynamic>(&mut rhai::Scope::new(), ast, name, all);
         let (world, cmds) = ctx.finish();
         self.world = world;
         if let Err(e) = result {
@@ -1033,7 +1430,9 @@ impl Game {
                 ScriptCmd::SpawnItem { x, y, item, count } => {
                     if let Some(i) = self.content.items.idx(&item) {
                         let content = self.content.clone();
-                        self.colony.items.add(&self.world, &content, i, count, tile_of(x, y));
+                        self.colony
+                            .items
+                            .add(&self.world, &content, i, count, tile_of(x, y));
                     } else {
                         self.message(format!("Script: unknown item '{item}'"));
                     }
@@ -1044,7 +1443,12 @@ impl Game {
                     }
                 }
                 ScriptCmd::Message(m) => self.message(m),
-                ScriptCmd::Spawn { creature, x, y, count } => {
+                ScriptCmd::Spawn {
+                    creature,
+                    x,
+                    y,
+                    count,
+                } => {
                     self.spawn_group(&creature, tile_of(x, y), count);
                 }
                 ScriptCmd::Power { id, x, y, radius } => {

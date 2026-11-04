@@ -7,14 +7,31 @@ use pw_world::*;
 /// Something that happened to an object; the game turns these into drops and script hooks.
 #[derive(Clone, Debug)]
 pub enum ObjectEvent {
-    Destroyed { def: usize, center: (i32, i32), natural: bool, built: bool },
-    Grown { def: usize, center: (i32, i32) },
-    Built { id: ObjId, def: usize, center: (i32, i32) },
+    Destroyed {
+        def: usize,
+        center: (i32, i32),
+        natural: bool,
+        built: bool,
+    },
+    Grown {
+        def: usize,
+        center: (i32, i32),
+    },
+    Built {
+        id: ObjId,
+        def: usize,
+        center: (i32, i32),
+    },
 }
 
 /// Where an object's cells go in the world.
-pub fn world_cells(inst_origin: (i32, i32), cells: &[StampCell]) -> impl Iterator<Item = (i32, i32, StampCell)> + '_ {
-    cells.iter().map(move |c| (inst_origin.0 + c.dx, inst_origin.1 + c.dy, *c))
+pub fn world_cells(
+    inst_origin: (i32, i32),
+    cells: &[StampCell],
+) -> impl Iterator<Item = (i32, i32, StampCell)> + '_ {
+    cells
+        .iter()
+        .map(move |c| (inst_origin.0 + c.dx, inst_origin.1 + c.dy, *c))
 }
 
 fn bounds(origin: (i32, i32), cells: &[StampCell]) -> ((i32, i32), (i32, i32)) {
@@ -30,7 +47,13 @@ fn bounds(origin: (i32, i32), cells: &[StampCell]) -> ((i32, i32), (i32, i32)) {
 
 /// Can this object be placed here? Solid cells need empty solid ground and
 /// walkable floor; floors need loaded ground.
-pub fn can_place(world: &World, content: &Content, def: usize, origin: (i32, i32), seed: u64) -> bool {
+pub fn can_place(
+    world: &World,
+    content: &Content,
+    def: usize,
+    origin: (i32, i32),
+    seed: u64,
+) -> bool {
     let cells = content.protos[def].cells(seed);
     for (x, y, c) in world_cells(origin, &cells) {
         if !world.is_loaded(x, y) {
@@ -49,7 +72,14 @@ pub fn can_place(world: &World, content: &Content, def: usize, origin: (i32, i32
 }
 
 /// Create an instance record without stamping particles (construction fills them in over time).
-pub fn create_instance(world: &mut World, content: &Content, def: usize, origin: (i32, i32), seed: u64, built: bool) -> ObjId {
+pub fn create_instance(
+    world: &mut World,
+    content: &Content,
+    def: usize,
+    origin: (i32, i32),
+    seed: u64,
+    built: bool,
+) -> ObjId {
     let cells = content.protos[def].cells(seed);
     let (min, max) = bounds(origin, &cells);
     let id = world.objects.alloc();
@@ -73,7 +103,14 @@ pub fn create_instance(world: &mut World, content: &Content, def: usize, origin:
 }
 
 /// Place an object and stamp all of its particles. Solid cells never overwrite existing solids.
-pub fn place(world: &mut World, content: &Content, def: usize, origin: (i32, i32), seed: u64, built: bool) -> ObjId {
+pub fn place(
+    world: &mut World,
+    content: &Content,
+    def: usize,
+    origin: (i32, i32),
+    seed: u64,
+    built: bool,
+) -> ObjId {
     let id = create_instance(world, content, def, origin, seed, built);
     let cells = content.protos[def].cells(seed);
     for (x, y, c) in world_cells(origin, &cells) {
@@ -87,7 +124,9 @@ pub fn place(world: &mut World, content: &Content, def: usize, origin: (i32, i32
 
 /// All loaded particles still belonging to an object: (x, y, layer).
 pub fn live_cells(world: &World, id: ObjId) -> Vec<(i32, i32, Layer)> {
-    let Some(inst) = world.objects.get(id) else { return Vec::new() };
+    let Some(inst) = world.objects.get(id) else {
+        return Vec::new();
+    };
     let mut v = Vec::new();
     for y in inst.min.1..=inst.max.1 {
         for x in inst.min.0..=inst.max.0 {
@@ -102,13 +141,21 @@ pub fn live_cells(world: &World, id: ObjId) -> Vec<(i32, i32, Layer)> {
 }
 
 /// Remove one random particle of the object (counts as damage). Returns what was removed.
-pub fn chip(world: &mut World, content: &Content, id: ObjId, rng: &mut Rng, prefer: Option<Layer>) -> Option<(i32, i32, Layer, MatId)> {
+pub fn chip(
+    world: &mut World,
+    content: &Content,
+    id: ObjId,
+    rng: &mut Rng,
+    prefer: Option<Layer>,
+) -> Option<(i32, i32, Layer, MatId)> {
     let cells = live_cells(world, id);
     if cells.is_empty() {
         return None;
     }
     let pool: Vec<_> = match prefer {
-        Some(p) if cells.iter().any(|c| c.2 == p) => cells.into_iter().filter(|c| c.2 == p).collect(),
+        Some(p) if cells.iter().any(|c| c.2 == p) => {
+            cells.into_iter().filter(|c| c.2 == p).collect()
+        }
         _ => cells,
     };
     let (x, y, l) = pool[rng.below(pool.len())];
@@ -118,7 +165,12 @@ pub fn chip(world: &mut World, content: &Content, id: ObjId, rng: &mut Rng, pref
 }
 
 /// Remove one particle of a yield material (e.g. a berry) without damaging the object.
-pub fn pluck(world: &mut World, content: &Content, id: ObjId, rng: &mut Rng) -> Option<(i32, i32, MatId)> {
+pub fn pluck(
+    world: &mut World,
+    content: &Content,
+    id: ObjId,
+    rng: &mut Rng,
+) -> Option<(i32, i32, MatId)> {
     let cells: Vec<_> = live_cells(world, id)
         .into_iter()
         .filter(|&(x, y, l)| content.mat_rt(world.get(x, y, l)).yields.is_some())
@@ -133,7 +185,9 @@ pub fn pluck(world: &mut World, content: &Content, id: ObjId, rng: &mut Rng) -> 
 }
 
 pub fn has_yield(world: &World, content: &Content, id: ObjId) -> bool {
-    live_cells(world, id).iter().any(|&(x, y, l)| content.mat_rt(world.get(x, y, l)).yields.is_some())
+    live_cells(world, id)
+        .iter()
+        .any(|&(x, y, l)| content.mat_rt(world.get(x, y, l)).yields.is_some())
 }
 
 /// Is there a support (wall or rock tile) within `range` tiles of `t`?
@@ -141,7 +195,8 @@ pub fn roof_supported(world: &World, t: TilePos, range: u32) -> bool {
     let r = range as i32;
     for dy in -r..=r {
         for dx in -r..=r {
-            if dx * dx + dy * dy <= r * r && world.tile(t.offset(dx, dy)).is_some_and(|i| i.support) {
+            if dx * dx + dy * dy <= r * r && world.tile(t.offset(dx, dy)).is_some_and(|i| i.support)
+            {
                 return true;
             }
         }
@@ -160,11 +215,14 @@ pub fn unsupported_roofs(world: &World, content: &Content) -> Vec<(ObjId, usize,
             let t = i.origin_tile();
             // Only judge roofs whose surroundings are loaded.
             let r = content.protos[i.def].needs_support as i32;
-            let loaded = [(-r, -r), (r, -r), (-r, r), (r, r)].iter().all(|&(dx, dy)| {
-                let (x, y) = t.offset(dx, dy).origin();
-                world.is_loaded(x, y)
-            });
-            (loaded && !roof_supported(world, t, content.protos[i.def].needs_support)).then_some((i.id, i.def, t))
+            let loaded = [(-r, -r), (r, -r), (-r, r), (r, r)]
+                .iter()
+                .all(|&(dx, dy)| {
+                    let (x, y) = t.offset(dx, dy).origin();
+                    world.is_loaded(x, y)
+                });
+            (loaded && !roof_supported(world, t, content.protos[i.def].needs_support))
+                .then_some((i.id, i.def, t))
         })
         .collect()
 }
@@ -186,7 +244,12 @@ pub fn destroy(world: &mut World, content: &Content, id: ObjId) -> Option<Object
         world.objects.natural.remove(&k);
         world.objects.destroyed_natural.insert(k);
     }
-    Some(ObjectEvent::Destroyed { def: inst.def, center: center(&inst), natural: inst.natural_key.is_some(), built: inst.built })
+    Some(ObjectEvent::Destroyed {
+        def: inst.def,
+        center: center(&inst),
+        natural: inst.natural_key.is_some(),
+        built: inst.built,
+    })
 }
 
 /// Break every damaged object that has lost too much.
@@ -194,7 +257,9 @@ pub fn process_damage(world: &mut World, content: &Content) -> Vec<ObjectEvent> 
     let ids: Vec<ObjId> = world.damaged.drain().collect();
     let mut out = Vec::new();
     for id in ids {
-        let Some(inst) = world.objects.get(id) else { continue };
+        let Some(inst) = world.objects.get(id) else {
+            continue;
+        };
         let frac = content.protos[inst.def].break_fraction;
         if inst.removed as f32 >= inst.total as f32 * frac {
             if let Some(e) = destroy(world, content, id) {
@@ -208,7 +273,13 @@ pub fn process_damage(world: &mut World, content: &Content) -> Vec<ObjectEvent> 
 /// Slow object life: growth into the next stage and regrowing yield particles.
 /// Runs on a slice of objects each tick so cost stays flat.
 /// `growth` scales how fast plants grow and regrow (season and temperature; 0 = paused).
-pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng, growth: f32) -> Vec<ObjectEvent> {
+pub fn tick_life(
+    world: &mut World,
+    content: &Content,
+    tick: u64,
+    rng: &mut Rng,
+    growth: f32,
+) -> Vec<ObjectEvent> {
     const EVERY: u64 = 30;
     let mut out = Vec::new();
     let ids: Vec<ObjId> = world
@@ -219,7 +290,9 @@ pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng,
         .map(|(id, _)| *id)
         .collect();
     for id in ids {
-        let Some(inst) = world.objects.instances.get_mut(&id) else { continue };
+        let Some(inst) = world.objects.instances.get_mut(&id) else {
+            continue;
+        };
         // Built things do not grow; plants age at the season's pace.
         if !inst.built {
             let step = EVERY as f32 * growth.max(0.0);
@@ -240,14 +313,19 @@ pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng,
                     let c = center(world.objects.get(id).unwrap());
                     destroy_quiet(world, content, id);
                     place(world, content, next, origin, seed, false);
-                    out.push(ObjectEvent::Grown { def: next, center: c });
+                    out.push(ObjectEvent::Grown {
+                        def: next,
+                        center: c,
+                    });
                 }
                 continue;
             }
         }
         // Grown plants drop seedlings nearby, unless it's crowded.
         if let Some((seedling, chance, radius, interval, max_nearby)) = proto.spread {
-            if !inst_built(world, id) && rng.chance(chance * growth.min(1.5) * EVERY as f32 / interval as f32) {
+            if !inst_built(world, id)
+                && rng.chance(chance * growth.min(1.5) * EVERY as f32 / interval as f32)
+            {
                 let home = tile_of(origin.0, origin.1);
                 let r = radius as i32;
                 let area = TileRect::from_corners(home.offset(-r, -r), home.offset(r, r));
@@ -256,7 +334,11 @@ pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng,
                 let kin = world
                     .objects_in_rect(area)
                     .into_iter()
-                    .filter(|o| world.objects.get(*o).is_some_and(|i| i.def == def || i.def == seedling || Some(i.def) == grown))
+                    .filter(|o| {
+                        world.objects.get(*o).is_some_and(|i| {
+                            i.def == def || i.def == seedling || Some(i.def) == grown
+                        })
+                    })
                     .count();
                 if kin < max_nearby as usize + 1 {
                     let t = home.offset(rng.range_i32(-r, r), rng.range_i32(-r, r));
@@ -269,8 +351,18 @@ pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng,
                         }
                     };
                     let seed = rng.next_u64();
-                    let soil = World::tile_cells(t).all(|(x, y)| world.get(x, y, Layer::Solid) == NONE_MAT && content.mat_rt(world.get(x, y, Layer::Floor)).has_tag("soil"));
-                    if soil && world.objects_in_rect(TileRect::from_corners(t, t)).is_empty() && can_place(world, content, seedling, o, seed) {
+                    let soil = World::tile_cells(t).all(|(x, y)| {
+                        world.get(x, y, Layer::Solid) == NONE_MAT
+                            && content
+                                .mat_rt(world.get(x, y, Layer::Floor))
+                                .has_tag("soil")
+                    });
+                    if soil
+                        && world
+                            .objects_in_rect(TileRect::from_corners(t, t))
+                            .is_empty()
+                        && can_place(world, content, seedling, o, seed)
+                    {
                         place(world, content, seedling, o, seed, false);
                     }
                 }
@@ -280,7 +372,10 @@ pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng,
             if (tick / EVERY) % (rg.interval as u64 / EVERY).max(1) == 0 {
                 let cells = proto.cells(seed);
                 for (x, y, c) in world_cells(origin, &cells) {
-                    if rg.mats.contains(&c.mat) && world.get(x, y, c.layer) == NONE_MAT && rng.chance(rg.chance * growth.min(1.5)) {
+                    if rg.mats.contains(&c.mat)
+                        && world.get(x, y, c.layer) == NONE_MAT
+                        && rng.chance(rg.chance * growth.min(1.5))
+                    {
                         world.set_raw(content, x, y, c.layer, c.mat, id);
                     }
                 }

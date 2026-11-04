@@ -58,6 +58,12 @@ The number is the world seed; leave it out for the default world. The first buil
 - Set each colonist's work priorities (1 = first, 4 = last, blank = never) so one is a builder and another a woodcutter.
 - Plant saplings and watch them grow into trees.
 
+**Keep them alive**
+- **Hunger.** A full stomach lasts about a day. Hungry colonists drop their work and go eat from your stores: berries fill a third of a stomach, meat more than half. You land with a few days of food; after that, mark berry bushes to harvest. With no food, they starve.
+- **Sleep.** Colonists need sleep about every 18 hours, and at night they go to bed. A bed rests them faster than the ground, and they look for a roof if there is no bed. Too tired and they slow down, then collapse where they stand.
+- **Warmth.** Each colonist feels the temperature where they stand: the weather, colder in wind and rain, milder under a roof, and warmer near a campfire. Below 12 C they get cold and go and warm up. A spring night outside is fine, but autumn and winter nights need a roof and a fire, or they freeze.
+- **Health.** Starving, freezing or standing in fire hurts. Colonists heal when they are fed and warm. The colonist panel shows each need as a bar, and the list flags anyone hungry, tired or cold.
+
 **A world that follows its own rules**
 - **Roofs need support.** A roof must be within 6 tiles of a wall or natural rock. Knock out the wall and the roof caves in.
 - **Fire is physics, not an animation.** It spreads particle by particle through anything flammable. Dry grass goes up fast, green lawns barely burn. Wind pushes it downwind and throws embers ahead. Rain and snow slow it down and put it out, except under a roof.
@@ -147,15 +153,17 @@ The base game is itself a mod (`assets/mods/core`): every material, plant, anima
 ```
 assets/mods/my_mod/
   mod.toml          id, name, version, depends = ["core"]
-  materials/*.ron   colour, tags (flammable, support, leaves...), blocks, walk cost, yields
-  items/*.ron
+  materials/*.ron   colour, tags (flammable, support, leaves...), blocks, walk cost, yields,
+                    heat given off (fire, embers, lava)
+  items/*.ron       stack size, nutrition (food)
   objects/*.ron     painted patterns or procedural shapes (circle, blob, rect, scatter)
   biomes/*.ron      climate ranges, ground mix, mountains, ore veins, what grows there
   reactions/*.ron   particle rules: input, neighbour, chance, effects, swap (movement),
                     weather (wet, windy), temperature range
   jobs/*.ron        new orders = a built-in behaviour + target tags
-  creatures/*.ron   colonists, or wild animals with a `life` section: diet, enemies,
-                    size, sight, lifespan, litter, herding, cold limit, mutation rate
+  creatures/*.ron   colonists (with `needs`: food, sleep, comfort range), or wild animals
+                    with a `life` section: diet, enemies, size, sight, lifespan, litter,
+                    herding, cold limit, mutation rate
   powers/*.ron      god powers: paint, ignite, place, spawn, weather, tribe, script, flash
   tribes/*.ron      peoples: food, lifespan, techs and what they unlock, building plans
   climate.ron       seasons, day length, temperatures, weather
@@ -199,7 +207,7 @@ PlanDef(id: "hut", name: "Hut", tech: "shelter",
               'b': ["core:bedroll", "core:roof_thatch"], 'r': ["core:roof_thatch"]})
 ```
 
-Scripts can react to the world. The game calls these by name in any mod: `on_hour(ctx)`, `on_day(ctx, day)`, `on_season(ctx, season)`, `on_weather(ctx, id)`, `on_new_species(ctx, name)`, `on_extinct(ctx, name)`, `on_tribe_founded(ctx, name)`, `on_discovery(ctx, tribe, tech)`, `on_tribe_lost(ctx, name)`. A script can:
+Scripts can react to the world. The game calls these by name in any mod: `on_hour(ctx)`, `on_day(ctx, day)`, `on_season(ctx, season)`, `on_weather(ctx, id)`, `on_new_species(ctx, name)`, `on_extinct(ctx, name)`, `on_tribe_founded(ctx, name)`, `on_discovery(ctx, tribe, tech)`, `on_tribe_lost(ctx, name)`, `on_colonist_died(ctx, name, cause)`. A script can:
 - read the temperature, season, weather, time, colony position and creature counts (`ctx.count("tribes")` counts tribes);
 - read and set any particle;
 - use any god power, spawn creatures and change the weather.
@@ -231,6 +239,7 @@ The tests cover:
 - pathfinding
 - chopping, harvesting, mining, hauling and building a room
 - work priorities
+- colonists eating, starving without food, sleeping in beds and warming up by a fire
 - fire, rain and wind; lava, ice, flooding and smoke
 - roof support and collapse
 - seasons and weather
@@ -252,11 +261,12 @@ Tools for testing:
   - `PW_AUTOSHOT_ROOF=1`: a finished roof with a colonist under it
   - `PW_AUTOSHOT_SPEED`: game speed
   - `PW_AUTOSHOT_TRIBES=N`: let the tribes live N days, then look at one
+  - `PW_AUTOSHOT_NEEDS=1`: select a hungry colonist to show its needs
 - **Frame times:** `PW_FRAMES=1` prints frame timings.
 
 ## Roadmap
 
-Next on the list: colonist needs (food, sleep, warmth), hunting and taming, crafting, farming zones, trade and diplomacy with tribes.
+Next on the list: hunting and taming, cooking and crafting, farming zones, clothes for the cold, trade and diplomacy with tribes.
 
 ## License
 

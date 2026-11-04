@@ -10,7 +10,7 @@
     MaterialDef(id: "core:thatch", name: "Thatch roof", color: "#c9a85ccc", variance: 0.15, tags: ["flammable", "roof"]),
     MaterialDef(id: "core:bed_cloth", name: "Bed linen", color: "#c8c0b0", variance: 0.04, tags: ["flammable", "built"]),
     MaterialDef(id: "core:bed_pillow", name: "Pillow", color: "#eee8dc", variance: 0.03, tags: ["flammable", "built"]),
-    MaterialDef(id: "core:ember", name: "Embers", color: "#e8762a", variance: 0.5, tags: ["glow"]),
+    MaterialDef(id: "core:ember", name: "Embers", color: "#e8762a", variance: 0.5, tags: ["glow"], heat: 4.0),
     MaterialDef(id: "core:fire_ring", name: "Stone ring", color: "#6f6a66", variance: 0.1, tags: ["built"]),
     MaterialDef(id: "core:totem_wood", name: "Carved totem", color: "#6e4a2c", variance: 0.1, blocks: true, tags: ["flammable", "built", "support"]),
     MaterialDef(id: "core:totem_paint", name: "Painted totem", color: "#c0392b", variance: 0.12, blocks: true, tags: ["flammable", "built", "support"]),

@@ -29,7 +29,9 @@ fn yes() -> bool {
 }
 
 /// The three particle layers of a cell.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
 pub enum Layer {
     /// Ground: grass, dirt, sand, water, wooden floor.
     Floor,
@@ -113,6 +115,9 @@ pub struct MaterialDef {
     pub hardness: f32,
     #[serde(default)]
     pub yields: Option<YieldDef>,
+    /// Warmth it gives off, C added to tiles close by (fire, embers, lava).
+    #[serde(default)]
+    pub heat: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -134,6 +139,9 @@ pub struct ItemDef {
     pub stack: u32,
     #[serde(default)]
     pub sprite: Option<SpriteDef>,
+    /// How much of an empty stomach one item fills (0 = not food).
+    #[serde(default)]
+    pub nutrition: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -439,6 +447,33 @@ pub struct CreatureDef {
     /// on their own. Colonists leave this out.
     #[serde(default)]
     pub life: Option<LifeDef>,
+    /// Colonists: hunger, rest and warmth. Left out, the creature has no needs.
+    #[serde(default)]
+    pub needs: Option<NeedsDef>,
+}
+
+/// What a colonist needs to stay alive and well.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NeedsDef {
+    /// In-game days a full stomach lasts.
+    #[serde(default = "one")]
+    pub food_days: f32,
+    /// In-game days a rested colonist can stay awake.
+    #[serde(default = "default_awake")]
+    pub awake_days: f32,
+    /// Comfortable temperature range, C. Colder than this chills them.
+    #[serde(default = "default_comfort")]
+    pub comfort: (f32, f32),
+    /// Days of starving or freezing it takes to die.
+    #[serde(default = "one")]
+    pub toughness: f32,
+}
+
+fn default_awake() -> f32 {
+    0.75
+}
+fn default_comfort() -> (f32, f32) {
+    (12.0, 32.0)
 }
 
 /// How a wild creature lives. Genes start at 1.0 (the species average) and
@@ -519,7 +554,11 @@ fn default_max_pop() -> u32 {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum FoodDef {
     /// Eat floor particles (`matches`: id, `tag:x`) and leave `leaves` behind.
-    Graze { matches: String, leaves: String, energy: f32 },
+    Graze {
+        matches: String,
+        leaves: String,
+        energy: f32,
+    },
     /// Eat from objects with these tags: their yield (berries) first, then leaves.
     Browse { tags: Vec<String>, energy: f32 },
     /// Hunt creatures with these tags; gains this share of the prey's energy.
@@ -661,7 +700,16 @@ impl Default for WorldGenDef {
 macro_rules! impl_def {
     ($($t:ty),*) => { $(impl Def for $t { fn def_id(&self) -> &str { &self.id } })* };
 }
-impl_def!(MaterialDef, ItemDef, ObjectDef, BiomeDef, ReactionDef, JobDef, CreatureDef, PowerDef);
+impl_def!(
+    MaterialDef,
+    ItemDef,
+    ObjectDef,
+    BiomeDef,
+    ReactionDef,
+    JobDef,
+    CreatureDef,
+    PowerDef
+);
 
 /// A god power: a brush the player paints onto the world, made of effects.
 /// Mods add powers by adding files to `powers/`.
@@ -809,7 +857,12 @@ pub struct TribeJobs {
 
 impl Default for TribeJobs {
     fn default() -> Self {
-        Self { harvest: job_harvest(), chop: job_chop(), quarry: job_quarry(), plant: job_plant() }
+        Self {
+            harvest: job_harvest(),
+            chop: job_chop(),
+            quarry: job_quarry(),
+            plant: job_plant(),
+        }
     }
 }
 

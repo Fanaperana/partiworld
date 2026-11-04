@@ -12,7 +12,13 @@ fn mods_dir() -> PathBuf {
 fn new_game(seed: u64) -> Game {
     let (content, scripts, report) = pw_mods::load_all(&mods_dir());
     assert!(report.ok(), "mod errors: {:#?}", report.errors);
-    Game::new(Arc::new(content), scripts, Arc::new(Extensions::default()), seed, mods_dir())
+    Game::new(
+        Arc::new(content),
+        scripts,
+        Arc::new(Extensions::default()),
+        seed,
+        mods_dir(),
+    )
 }
 
 fn run(g: &mut Game, ticks: u32, until: impl Fn(&Game) -> bool) -> bool {
@@ -32,8 +38,17 @@ fn mods_load_and_patch() {
     assert!(c.objects.get("core:oak_tree").is_some());
     assert!(c.objects.get("example_crystals:crystal_tree").is_some());
     let forest = c.biomes.get("core:forest").unwrap();
-    assert!(forest.scatter.iter().any(|s| s.object == "example_crystals:crystal_tree"), "patch did not append scatter");
-    assert!(c.reaction_rt.is_active(Layer::Floor, c.mat("core:fire").unwrap()));
+    assert!(
+        forest
+            .scatter
+            .iter()
+            .any(|s| s.object == "example_crystals:crystal_tree"),
+        "patch did not append scatter"
+    );
+    assert!(
+        c.reaction_rt
+            .is_active(Layer::Floor, c.mat("core:fire").unwrap())
+    );
 }
 
 #[test]
@@ -48,7 +63,10 @@ fn mod_order_and_errors() {
         path: PathBuf::new(),
     };
     let sorted = pw_mods::sort_mods(vec![m("b", &["a"]), m("a", &[])]).unwrap();
-    assert_eq!(sorted.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    assert_eq!(
+        sorted.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        ["a", "b"]
+    );
     assert!(pw_mods::sort_mods(vec![m("a", &["b"]), m("b", &["a"])]).is_err());
     assert!(pw_mods::sort_mods(vec![m("a", &["zzz"])]).is_err());
 }
@@ -163,7 +181,10 @@ fn colonists_harvest_berries() {
     let done = run(&mut g, 30 * 150, |g| g.colony.designations.is_empty());
     assert!(done, "harvest did not finish");
     assert!(g.colony.items.total(berries) > before);
-    assert!(g.world.objects.get(bush).is_some(), "harvesting must not destroy the bush");
+    assert!(
+        g.world.objects.get(bush).is_some(),
+        "harvesting must not destroy the bush"
+    );
 }
 
 #[test]
@@ -182,17 +203,34 @@ fn colonists_build_and_haul() {
     let placed = g.build("core:wall_wood", rect);
     assert!(placed >= 6, "placed {placed}");
     let ok = run(&mut g, 30 * 300, |g| g.colony.blueprints.is_empty());
-    assert!(ok, "walls not built; {} blueprints left", g.colony.blueprints.len());
+    assert!(
+        ok,
+        "walls not built; {} blueprints left",
+        g.colony.blueprints.len()
+    );
     let wall = g.content.objects.idx("core:wall_wood").unwrap();
-    let built = g.world.objects.instances.values().filter(|i| i.built && i.def == wall && rect.contains(i.origin_tile())).count();
+    let built = g
+        .world
+        .objects
+        .instances
+        .values()
+        .filter(|i| i.built && i.def == wall && rect.contains(i.origin_tile()))
+        .count();
     assert_eq!(built, placed);
     // Walls block movement.
     assert!(!g.world.walkable(rect.min));
 
     // Stockpile hauling.
-    g.stockpile(TileRect::from_corners(home.offset(-6, -6), home.offset(-4, -4)), true);
+    g.stockpile(
+        TileRect::from_corners(home.offset(-6, -6), home.offset(-4, -4)),
+        true,
+    );
     let ok = run(&mut g, 30 * 120, |g| {
-        g.colony.items.stacks.values().all(|s| g.colony.stockpile.contains(&s.tile))
+        g.colony
+            .items
+            .stacks
+            .values()
+            .all(|s| g.colony.stockpile.contains(&s.tile))
     });
     assert!(ok, "items not hauled to stockpile");
 }
@@ -209,7 +247,11 @@ fn builders_finish_room_from_outside() {
     }
     g.world.rebuild_tiles(&c);
     // Lots of other work around, at a lower global priority than building.
-    g.designate("core:chop", TileRect::from_corners(home.offset(-20, -20), home.offset(20, 20)), None);
+    g.designate(
+        "core:chop",
+        TileRect::from_corners(home.offset(-20, -20), home.offset(20, 20)),
+        None,
+    );
     let room = TileRect::from_corners(home.offset(2, 2), home.offset(8, 8));
     let walls = g.build("core:wall_wood", room);
     assert!(walls >= 20, "placed {walls}");
@@ -218,7 +260,11 @@ fn builders_finish_room_from_outside() {
         ticks.set(ticks.get() + 1);
         g.colony.blueprints.is_empty()
     });
-    assert!(ok, "room not built; {} blueprints left", g.colony.blueprints.len());
+    assert!(
+        ok,
+        "room not built; {} blueprints left",
+        g.colony.blueprints.len()
+    );
     println!("room of {walls} walls built in {} ticks", ticks.get());
     let inside = TileRect::from_corners(home.offset(3, 3), home.offset(7, 7));
     for p in &g.colony.pawns {
@@ -236,10 +282,16 @@ fn work_priorities_turn_jobs_off() {
     let (tree, tile) = nearest_object_with_tag(&g, "tree").expect("a tree nearby");
     g.designate("core:chop", TileRect::from_corners(tile, tile), None);
     run(&mut g, 30 * 60, |_| false);
-    assert!(g.world.objects.get(tree).is_some(), "tree chopped with chopping turned off");
+    assert!(
+        g.world.objects.get(tree).is_some(),
+        "tree chopped with chopping turned off"
+    );
     assert_eq!(g.world.objects.get(tree).unwrap().removed, 0);
     g.colony.pawns[0].work.insert("core:chop".into(), 1);
-    assert!(run(&mut g, 30 * 120, |g| g.world.objects.get(tree).is_none()), "tree not felled once allowed");
+    assert!(
+        run(&mut g, 30 * 120, |g| g.world.objects.get(tree).is_none()),
+        "tree not felled once allowed"
+    );
 }
 
 #[test]
@@ -258,7 +310,10 @@ fn colonists_mine_rock() {
     g.world.rebuild_tiles(&c);
     let item = c.items.idx("core:stone").unwrap();
     let before = g.colony.items.total(item);
-    assert_eq!(g.designate("core:mine", TileRect::from_corners(t, t), None), 1);
+    assert_eq!(
+        g.designate("core:mine", TileRect::from_corners(t, t), None),
+        1
+    );
     let ok = run(&mut g, 30 * 200, |g| g.colony.designations.is_empty());
     assert!(ok, "mining did not finish");
     assert!(g.world.walkable(t));
@@ -279,7 +334,13 @@ fn fire_spreads_and_burns_out() {
     g.env.wind_target = 0.0;
     g.ignite(x as i32, y as i32, 3);
     let fire = g.content.mat("core:fire").unwrap();
-    let burning = |g: &Game| g.world.chunks.values().map(|c| c.mat.iter().flatten().filter(|&&m| m == fire).count()).sum::<usize>();
+    let burning = |g: &Game| {
+        g.world
+            .chunks
+            .values()
+            .map(|c| c.mat.iter().flatten().filter(|&&m| m == fire).count())
+            .sum::<usize>()
+    };
     run(&mut g, 60, |_| false);
     assert!(burning(&g) > 0);
     run(&mut g, 30 * 60, |g| g.world.objects.get(tree).is_none());
@@ -291,7 +352,11 @@ fn scripts_run_on_hooks() {
     let mut g = new_game(3);
     g.load_chunks_now(ChunkPos::new(-1, -1), ChunkPos::new(1, 1));
     let shard = g.content.items.idx("example_crystals:shard").unwrap();
-    let def = g.content.objects.idx("example_crystals:crystal_tree").unwrap();
+    let def = g
+        .content
+        .objects
+        .idx("example_crystals:crystal_tree")
+        .unwrap();
     let home = g.spawn_tile();
     let (x, y) = home.offset(0, 4).center();
     g.run_hook(def, "on_destroyed", (x as i32, y as i32));
@@ -311,7 +376,13 @@ fn saplings_grow() {
     assert!(g.place_object("core:berry_sprout", x as i32, y as i32));
     let bush = c.objects.idx("core:berry_bush").unwrap();
     // Growth speed depends on season and temperature, so allow some slack.
-    let ok = run(&mut g, 2400 * 3, |g| g.world.objects.instances.values().any(|i| i.def == bush && i.origin == (x as i32, y as i32)));
+    let ok = run(&mut g, 2400 * 3, |g| {
+        g.world
+            .objects
+            .instances
+            .values()
+            .any(|i| i.def == bush && i.origin == (x as i32, y as i32))
+    });
     assert!(ok, "sprout did not grow");
 }
 
@@ -325,11 +396,18 @@ fn debug_fire() {
     g.ignite(x as i32, y as i32, 3);
     let fire = g.content.mat("core:fire").unwrap();
     for s in 0..40 {
-        let n: usize = g.world.chunks.values().map(|c| c.mat.iter().flatten().filter(|&&m| m == fire).count()).sum();
+        let n: usize = g
+            .world
+            .chunks
+            .values()
+            .map(|c| c.mat.iter().flatten().filter(|&&m| m == fire).count())
+            .sum();
         let act: usize = g.world.chunks.values().map(|c| c.active.len()).sum();
         let inst = g.world.objects.get(tree).map(|i| (i.removed, i.total));
         eprintln!("t={s:>3}s fire={n} active={act} tree={inst:?}");
-        for _ in 0..30 { g.step(); }
+        for _ in 0..30 {
+            g.step();
+        }
     }
 }
 
@@ -348,9 +426,19 @@ fn bench_busy_colony() {
     g.designate("core:chop", big, None);
     g.designate("core:harvest", big, None);
     g.designate("core:quarry", big, None);
-    println!("BENCH designate {} orders in {:.1} ms", g.colony.designations.len(), t0.elapsed().as_secs_f64() * 1000.0);
-    g.stockpile(TileRect::from_corners(home.offset(-8, -8), home.offset(-3, -3)), true);
-    g.build("core:wall_wood", TileRect::from_corners(home.offset(4, 4), home.offset(12, 12)));
+    println!(
+        "BENCH designate {} orders in {:.1} ms",
+        g.colony.designations.len(),
+        t0.elapsed().as_secs_f64() * 1000.0
+    );
+    g.stockpile(
+        TileRect::from_corners(home.offset(-8, -8), home.offset(-3, -3)),
+        true,
+    );
+    g.build(
+        "core:wall_wood",
+        TileRect::from_corners(home.offset(4, 4), home.offset(12, 12)),
+    );
     let t = std::time::Instant::now();
     let mut worst = 0f64;
     for _ in 0..3000 {
@@ -360,7 +448,12 @@ fn bench_busy_colony() {
     }
     println!("BENCH worst tick {worst:.2} ms");
     let ms = t.elapsed().as_secs_f64() * 1000.0;
-    println!("BENCH {:.3} ms/tick, {} designations left, {} blueprints left", ms / 3000.0, g.colony.designations.len(), g.colony.blueprints.len());
+    println!(
+        "BENCH {:.3} ms/tick, {} designations left, {} blueprints left",
+        ms / 3000.0,
+        g.colony.designations.len(),
+        g.colony.blueprints.len()
+    );
 }
 
 fn clear_area(g: &mut Game, a: TilePos, b: TilePos) {
@@ -381,7 +474,11 @@ fn roofs_need_support_and_collapse_without_it() {
     // Out in the open: no wall or rock nearby.
     let t = home.offset(10, 10);
     assert_eq!(g.build("core:roof_thatch", TileRect::from_corners(t, t)), 0);
-    assert!(g.last_build_error.as_deref().unwrap_or("").contains("wall"), "{:?}", g.last_build_error);
+    assert!(
+        g.last_build_error.as_deref().unwrap_or("").contains("wall"),
+        "{:?}",
+        g.last_build_error
+    );
 
     // A finished wall makes roofs nearby possible.
     let c = g.content.clone();
@@ -390,13 +487,19 @@ fn roofs_need_support_and_collapse_without_it() {
     let wall_id = pw_objects::place(&mut g.world, &c, wall, wt.origin(), 1, true);
     g.world.rebuild_tiles(&c);
     let rt = home.offset(6, 4);
-    assert_eq!(g.build("core:roof_thatch", TileRect::from_corners(rt, rt)), 1);
+    assert_eq!(
+        g.build("core:roof_thatch", TileRect::from_corners(rt, rt)),
+        1
+    );
     // ...and a roof placed straight away stays up.
     let roof = c.objects.idx("core:roof_thatch").unwrap();
     let rt2 = home.offset(7, 4);
     let roof_id = pw_objects::place(&mut g.world, &c, roof, rt2.origin(), 1, true);
     run(&mut g, 90, |_| false);
-    assert!(g.world.objects.get(roof_id).is_some(), "supported roof fell");
+    assert!(
+        g.world.objects.get(roof_id).is_some(),
+        "supported roof fell"
+    );
 
     // Knock the wall down: the roof falls in.
     pw_objects::destroy(&mut g.world, &c, wall_id);
@@ -452,7 +555,11 @@ fn burn_field(wet: f32, wind: (f32, f32)) -> (usize, f32) {
         }
     }
     let mut rng = Rng::new(7);
-    let env = pw_sim::SimEnv { wet, wind, temp: 15.0 };
+    let env = pw_sim::SimEnv {
+        wet,
+        wind,
+        temp: 15.0,
+    };
     for _ in 0..400 {
         pw_sim::tick(&mut w, &c, &mut rng, &Default::default(), &env);
     }
@@ -474,7 +581,10 @@ fn rain_slows_fire_and_wind_pushes_it() {
     assert!(wet * 3 < dry, "rain should slow fire: dry {dry}, wet {wet}");
     let (_, east) = burn_field(0.0, (0.9, 0.0));
     let (_, west) = burn_field(0.0, (-0.9, 0.0));
-    assert!(east > 128.0 + 4.0 && west < 128.0 - 4.0, "wind should push fire: east {east}, west {west}");
+    assert!(
+        east > 128.0 + 4.0 && west < 128.0 - 4.0,
+        "wind should push fire: east {east}, west {west}"
+    );
 }
 
 /// A one-chunk world filled with one floor material, for physics tests.
@@ -489,12 +599,19 @@ fn flat_world(c: &Content, floor: &str) -> pw_world::World {
 
 fn count(w: &pw_world::World, c: &Content, layer: Layer, mat: &str) -> usize {
     let m = c.mat(mat).unwrap();
-    w.chunks.values().map(|ch| ch.mat[layer.index()].iter().filter(|&&x| x == m).count()).sum()
+    w.chunks
+        .values()
+        .map(|ch| ch.mat[layer.index()].iter().filter(|&&x| x == m).count())
+        .sum()
 }
 
 fn sim(w: &mut pw_world::World, c: &Content, ticks: u32, temp: f32) {
     let mut rng = Rng::new(3);
-    let env = pw_sim::SimEnv { wet: 0.0, wind: (0.0, 0.0), temp };
+    let env = pw_sim::SimEnv {
+        wet: 0.0,
+        wind: (0.0, 0.0),
+        temp,
+    };
     for _ in 0..ticks {
         pw_sim::tick(w, c, &mut rng, &Default::default(), &env);
     }
@@ -507,12 +624,18 @@ fn every_power_works() {
     let ids: Vec<String> = g.content.powers.iter().map(|(_, p)| p.id.clone()).collect();
     assert!(ids.len() >= 10, "{ids:?}");
     for (i, id) in ids.iter().enumerate() {
-        let (x, y) = home.offset(-20 + (i as i32 % 5) * 10, 10 + (i as i32 / 5) * 10).center();
+        let (x, y) = home
+            .offset(-20 + (i as i32 % 5) * 10, 10 + (i as i32 / 5) * 10)
+            .center();
         let r = g.content.powers.get(id).unwrap().radius;
         assert!(g.use_power(id, x as i32, y as i32, r), "{id}");
     }
     run(&mut g, 60, |_| false);
-    let bad: Vec<&String> = g.log.iter().filter(|m| m.contains("unknown") || m.contains("failed")).collect();
+    let bad: Vec<&String> = g
+        .log
+        .iter()
+        .filter(|m| m.contains("unknown") || m.contains("failed"))
+        .collect();
     assert!(bad.is_empty(), "{bad:?}");
 }
 
@@ -527,10 +650,17 @@ fn lava_flows_burns_and_cools() {
         }
     }
     sim(&mut w, &c, 400, 15.0);
-    let hot = count(&w, &c, Layer::Floor, "core:lava") + count(&w, &c, Layer::Floor, "core:lava_flow") + count(&w, &c, Layer::Floor, "core:lava_edge");
-    assert!(hot + count(&w, &c, Layer::Floor, "core:basalt") > 49, "lava did not spread");
+    let hot = count(&w, &c, Layer::Floor, "core:lava")
+        + count(&w, &c, Layer::Floor, "core:lava_flow")
+        + count(&w, &c, Layer::Floor, "core:lava_edge");
+    assert!(
+        hot + count(&w, &c, Layer::Floor, "core:basalt") > 49,
+        "lava did not spread"
+    );
     sim(&mut w, &c, 6000, 15.0);
-    let still_hot = count(&w, &c, Layer::Floor, "core:lava") + count(&w, &c, Layer::Floor, "core:lava_flow") + count(&w, &c, Layer::Floor, "core:lava_edge");
+    let still_hot = count(&w, &c, Layer::Floor, "core:lava")
+        + count(&w, &c, Layer::Floor, "core:lava_flow")
+        + count(&w, &c, Layer::Floor, "core:lava_edge");
     assert!(still_hot < 10, "lava did not cool: {still_hot} left");
     assert!(count(&w, &c, Layer::Floor, "core:basalt") > 49);
 }
@@ -543,7 +673,10 @@ fn water_freezes_thaws_and_fills_pits() {
     let ice = count(&w, &c, Layer::Floor, "core:ice");
     assert!(ice > 20_000, "only {ice} ice");
     sim(&mut w, &c, 4000, 10.0);
-    assert!(count(&w, &c, Layer::Floor, "core:ice") < ice / 2, "ice did not melt");
+    assert!(
+        count(&w, &c, Layer::Floor, "core:ice") < ice / 2,
+        "ice did not melt"
+    );
 
     // A channel dug next to water fills up.
     let mut w = flat_world(&c, "core:dirt");
@@ -556,7 +689,11 @@ fn water_freezes_thaws_and_fills_pits() {
         w.set(&c, x, 100, Layer::Floor, pit, pw_world::NO_OBJ);
     }
     sim(&mut w, &c, 1500, 15.0);
-    assert_eq!(count(&w, &c, Layer::Floor, "core:pit"), 0, "channel did not fill");
+    assert_eq!(
+        count(&w, &c, Layer::Floor, "core:pit"),
+        0,
+        "channel did not fill"
+    );
 }
 
 #[test]
@@ -566,23 +703,43 @@ fn smoke_drifts_with_the_wind_and_fades() {
     let smoke = c.mat("core:smoke").unwrap();
     for dy in -2..=2 {
         for dx in -2..=2 {
-            w.set(&c, 128 + dx, 128 + dy, Layer::Overlay, smoke, pw_world::NO_OBJ);
+            w.set(
+                &c,
+                128 + dx,
+                128 + dy,
+                Layer::Overlay,
+                smoke,
+                pw_world::NO_OBJ,
+            );
         }
     }
     let mut rng = Rng::new(3);
-    let env = pw_sim::SimEnv { wet: 0.0, wind: (0.9, 0.0), temp: 15.0 };
+    let env = pw_sim::SimEnv {
+        wet: 0.0,
+        wind: (0.9, 0.0),
+        temp: 15.0,
+    };
     for _ in 0..40 {
         pw_sim::tick(&mut w, &c, &mut rng, &Default::default(), &env);
     }
     let ch = &w.chunks[&ChunkPos::new(0, 0)];
-    let xs: Vec<f32> = ch.mat[2].iter().enumerate().filter(|(_, m)| **m == smoke).map(|(i, _)| (i % 256) as f32).collect();
+    let xs: Vec<f32> = ch.mat[2]
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| **m == smoke)
+        .map(|(i, _)| (i % 256) as f32)
+        .collect();
     assert!(!xs.is_empty());
     let mean = xs.iter().sum::<f32>() / xs.len() as f32;
     assert!(mean > 131.0, "smoke should drift east, mean x {mean}");
     for _ in 0..2000 {
         pw_sim::tick(&mut w, &c, &mut rng, &Default::default(), &env);
     }
-    assert_eq!(count(&w, &c, Layer::Overlay, "core:smoke"), 0, "smoke never faded");
+    assert_eq!(
+        count(&w, &c, Layer::Overlay, "core:smoke"),
+        0,
+        "smoke never faded"
+    );
 }
 
 #[test]
@@ -592,16 +749,41 @@ fn wildlife_lives_breeds_learns_and_hunts() {
     let start: Vec<[f32; pw_life::ACTIONS]> = g.life.creatures.iter().map(|c| c.brain).collect();
     let t = std::time::Instant::now();
     run(&mut g, (DAY_TICKS * 4) as u32, |_| false);
-    let gens = g.life.creatures.iter().map(|c| c.generation).max().unwrap_or(0);
+    let gens = g
+        .life
+        .creatures
+        .iter()
+        .map(|c| c.generation)
+        .max()
+        .unwrap_or(0);
     let born: u32 = g.life.species.iter().map(|s| s.born).sum();
     let died: u32 = g.life.species.iter().map(|s| s.died).sum();
-    println!("4 days: {} alive, {born} born, {died} died, max generation {gens}, {:.1}s", g.life.alive(), t.elapsed().as_secs_f32());
+    println!(
+        "4 days: {} alive, {born} born, {died} died, max generation {gens}, {:.1}s",
+        g.life.alive(),
+        t.elapsed().as_secs_f32()
+    );
     assert!(born > 0 && gens >= 1, "nothing was born");
     // Children differ from the species average: genes mutate.
-    let young: Vec<&pw_life::Creature> = g.life.creatures.iter().filter(|c| c.generation > 0).collect();
-    assert!(young.iter().any(|c| c.genes.iter().any(|&x| (x - 1.0).abs() > 0.05)), "no mutation");
+    let young: Vec<&pw_life::Creature> = g
+        .life
+        .creatures
+        .iter()
+        .filter(|c| c.generation > 0)
+        .collect();
+    assert!(
+        young
+            .iter()
+            .any(|c| c.genes.iter().any(|&x| (x - 1.0).abs() > 0.05)),
+        "no mutation"
+    );
     // Brains changed from experience.
-    let learned = g.life.creatures.iter().filter(|c| c.brain.iter().any(|&w| (w - 1.0).abs() > 0.15)).count();
+    let learned = g
+        .life
+        .creatures
+        .iter()
+        .filter(|c| c.brain.iter().any(|&w| (w - 1.0).abs() > 0.15))
+        .count();
     assert!(learned > 0 || start.is_empty(), "nobody learned anything");
     // Grazing ate grass somewhere: some died of something, rabbits kept eating.
     assert!(died > 0 || g.life.alive() > 0);
@@ -612,7 +794,12 @@ fn wolves_hunt_and_lineages_become_new_species() {
     let mut g = new_game(12);
     // Fast mutation so drift shows up within a short test.
     let mut c = (*g.content).clone();
-    for (_, d) in c.creatures.iter().map(|(i, d)| (i, d.clone())).collect::<Vec<_>>() {
+    for (_, d) in c
+        .creatures
+        .iter()
+        .map(|(i, d)| (i, d.clone()))
+        .collect::<Vec<_>>()
+    {
         if let Some(mut life) = d.life.clone() {
             life.mutation = 0.35;
             life.breed_every_hours = 6.0;
@@ -628,11 +815,24 @@ fn wolves_hunt_and_lineages_become_new_species() {
     g.spawn_group("core:wolf", home.offset(4, 4), 4);
     g.spawn_group("core:rabbit", home.offset(6, 4), 12);
     let ok = run(&mut g, (DAY_TICKS * 3) as u32, |g| g.life.species.len() > 3);
-    println!("species: {:?}", g.life.species.iter().map(|s| (&s.name, s.alive, s.born)).collect::<Vec<_>>());
+    println!(
+        "species: {:?}",
+        g.life
+            .species
+            .iter()
+            .map(|s| (&s.name, s.alive, s.born))
+            .collect::<Vec<_>>()
+    );
     assert!(ok, "no new species appeared");
     assert!(g.log.iter().any(|m| m.contains("new species")));
     // Give the wolves time to hunt.
-    let eaten = |g: &Game| g.life.species.iter().map(|s| s.causes[pw_life::Death::Eaten as usize]).sum::<u32>();
+    let eaten = |g: &Game| {
+        g.life
+            .species
+            .iter()
+            .map(|s| s.causes[pw_life::Death::Eaten as usize])
+            .sum::<u32>()
+    };
     let caught = run(&mut g, (DAY_TICKS * 2) as u32, |g| eaten(g) > 0);
     assert!(caught, "wolves never caught anything");
 }
@@ -644,7 +844,14 @@ fn forests_spread() {
     let sapling = g.content.objects.idx("core:oak_sapling").unwrap();
     let pine_sapling = g.content.objects.idx("core:pine_sapling").unwrap();
     let sprout = g.content.objects.idx("core:berry_sprout").unwrap();
-    let young = |g: &Game| g.world.objects.instances.values().filter(|i| [sapling, pine_sapling, sprout].contains(&i.def)).count();
+    let young = |g: &Game| {
+        g.world
+            .objects
+            .instances
+            .values()
+            .filter(|i| [sapling, pine_sapling, sprout].contains(&i.def))
+            .count()
+    };
     let before = young(&g);
     let ok = run(&mut g, (DAY_TICKS * 2) as u32, |g| young(g) > before + 2);
     assert!(ok, "no new saplings: {before} -> {}", young(&g));
@@ -657,13 +864,37 @@ fn debug_wildlife() {
     let mut causes: std::collections::BTreeMap<String, u32> = Default::default();
     for hour in 0..(24 * 3) {
         for _ in 0..(DAY_TICKS / 24) {
-            let before: Vec<(u32, String)> = g.life.creatures.iter().map(|c| (c.id, g.content.creatures.by_idx(c.def).name.clone())).collect();
+            let before: Vec<(u32, String)> = g
+                .life
+                .creatures
+                .iter()
+                .map(|c| (c.id, g.content.creatures.by_idx(c.def).name.clone()))
+                .collect();
             g.step();
             let _ = before;
         }
         if hour % 6 == 0 {
-            let s: Vec<String> = g.life.creatures.iter().take(6).map(|c| format!("{}:{:.0}e {} b{:?}", g.content.creatures.by_idx(c.def).name, c.energy, c.activity(), c.brain.map(|b| (b * 10.0).round() / 10.0))).collect();
-            println!("h{hour} temp {:.0} alive {} :: {}", g.env.temp, g.life.alive(), s.join(" | "));
+            let s: Vec<String> = g
+                .life
+                .creatures
+                .iter()
+                .take(6)
+                .map(|c| {
+                    format!(
+                        "{}:{:.0}e {} b{:?}",
+                        g.content.creatures.by_idx(c.def).name,
+                        c.energy,
+                        c.activity(),
+                        c.brain.map(|b| (b * 10.0).round() / 10.0)
+                    )
+                })
+                .collect();
+            println!(
+                "h{hour} temp {:.0} alive {} :: {}",
+                g.env.temp,
+                g.life.alive(),
+                s.join(" | ")
+            );
         }
     }
     let _ = &mut causes;
@@ -677,7 +908,11 @@ fn world_events_reach_scripts() {
     g.env.weather = "core:storm".into();
     g.env.weather_until = g.tick + DAY_TICKS;
     run(&mut g, (HOUR_TICKS * 8) as u32, |_| false);
-    assert!(g.log.iter().any(|m| m.contains("thunderstorm")), "on_weather not called: {:?}", g.log);
+    assert!(
+        g.log.iter().any(|m| m.contains("thunderstorm")),
+        "on_weather not called: {:?}",
+        g.log
+    );
     assert!(!g.log.iter().any(|m| m.contains("failed")), "{:?}", g.log);
     // Seasons change after a season's days.
     let season_ticks = DAY_TICKS * g.content.climate.days_per_season as u64;
@@ -691,7 +926,8 @@ fn world_events_reach_scripts() {
 fn roundtrip<T: serde::Serialize + serde::de::DeserializeOwned + Def>(r: &Registry<T>) {
     for (_, d) in r.iter() {
         let text = pw_mods::to_ron(d).unwrap();
-        let back: T = pw_mods::parse_ron(&text).unwrap_or_else(|e| panic!("{}: {e}\n{text}", d.def_id()));
+        let back: T =
+            pw_mods::parse_ron(&text).unwrap_or_else(|e| panic!("{}: {e}\n{text}", d.def_id()));
         assert_eq!(back.def_id(), d.def_id());
     }
 }
@@ -765,7 +1001,12 @@ fn tribe_report(g: &Game) -> String {
             t.died,
             t.gone,
         );
-        let acts: Vec<String> = t.colony.pawns.iter().map(|p| p.activity().to_string()).collect();
+        let acts: Vec<String> = t
+            .colony
+            .pawns
+            .iter()
+            .map(|p| p.activity().to_string())
+            .collect();
         s += &format!("    doing: {acts:?}\n");
     }
     s
@@ -777,12 +1018,19 @@ fn debug_tribes() {
     let mut g = new_game(7);
     println!("start:\n{}", tribe_report(&g));
     let t0 = std::time::Instant::now();
-    let days: u64 = std::env::var("PW_DAYS").ok().and_then(|d| d.parse().ok()).unwrap_or(12);
+    let days: u64 = std::env::var("PW_DAYS")
+        .ok()
+        .and_then(|d| d.parse().ok())
+        .unwrap_or(12);
     for day in 1..=days {
         for _ in 0..DAY_TICKS {
             g.step();
         }
-        println!("day {day} ({:.1}s):\n{}", t0.elapsed().as_secs_f32(), tribe_report(&g));
+        println!(
+            "day {day} ({:.1}s):\n{}",
+            t0.elapsed().as_secs_f32(),
+            tribe_report(&g)
+        );
     }
     for t in &g.tribes.list {
         println!("{}:\n  {}", t.name, t.chronicle.join("\n  "));
@@ -807,35 +1055,69 @@ fn bench_tribes() {
         let mut tt = 0.0;
         for _ in 0..1500 {
             let content = g.content.clone();
-            let env = pw_tribe::TribeEnv { tick: g.tick, day_ticks: DAY_TICKS, dark: 0.0, walk: 1.0, keep_out: vec![] };
+            let env = pw_tribe::TribeEnv {
+                tick: g.tick,
+                day_ticks: DAY_TICKS,
+                dark: 0.0,
+                walk: 1.0,
+                keep_out: vec![],
+            };
             let t1 = std::time::Instant::now();
-            g.tribes.tick(&mut g.world, &content, &mut g.rng, &env, &mut g.life);
+            g.tribes
+                .tick(&mut g.world, &content, &mut g.rng, &env, &mut g.life);
             tt += t1.elapsed().as_secs_f64();
             g.tick += 1;
         }
         let t2 = std::time::Instant::now();
         for _ in 0..300 {
             let content = g.content.clone();
-            pw_sim::tick(&mut g.world, &content, &mut g.rng, &g.sim, &pw_sim::SimEnv { wet: 0.0, wind: (0.0, 0.0), temp: 15.0 });
+            pw_sim::tick(
+                &mut g.world,
+                &content,
+                &mut g.rng,
+                &g.sim,
+                &pw_sim::SimEnv {
+                    wet: 0.0,
+                    wind: (0.0, 0.0),
+                    temp: 15.0,
+                },
+            );
         }
         let sim = t2.elapsed().as_secs_f64() * 1000.0 / 300.0;
         let t3 = std::time::Instant::now();
         for _ in 0..300 {
             let content = g.content.clone();
-            let env = pw_life::LifeEnv { tick: g.tick, day_ticks: DAY_TICKS, temp: 15.0, dark: 0.0, walk: 1.0 };
+            let env = pw_life::LifeEnv {
+                tick: g.tick,
+                day_ticks: DAY_TICKS,
+                temp: 15.0,
+                dark: 0.0,
+                walk: 1.0,
+            };
             g.life.tick(&mut g.world, &content, &mut g.rng, &env);
         }
         let life = t3.elapsed().as_secs_f64() * 1000.0 / 300.0;
-        println!("tribes {with}: chunks {chunks} step {a:.3} ms, tribes alone {:.3} ms, sim {sim:.3} ms, life {life:.3} ms ({} animals)", tt * 1000.0 / 1500.0, g.life.alive());
+        println!(
+            "tribes {with}: chunks {chunks} step {a:.3} ms, tribes alone {:.3} ms, sim {sim:.3} ms, life {life:.3} ms ({} animals)",
+            tt * 1000.0 / 1500.0,
+            g.life.alive()
+        );
     }
 }
 
 #[test]
 fn tribes_settle_build_and_grow() {
     let mut g = new_game(7);
-    assert_eq!(g.tribes.alive(), 2, "two tribes should settle near the colony");
+    assert_eq!(
+        g.tribes.alive(),
+        2,
+        "two tribes should settle near the colony"
+    );
     for t in g.tribes.living() {
-        assert!(t.center.chebyshev(g.home) >= 30, "tribes keep their distance");
+        assert!(
+            t.center.chebyshev(g.home) >= 30,
+            "tribes keep their distance"
+        );
         assert!(t.members.len() >= 4);
     }
     let culture0: Vec<[f32; pw_tribe::FOCI]> = g.tribes.list.iter().map(|t| t.culture).collect();
@@ -843,10 +1125,16 @@ fn tribes_settle_build_and_grow() {
     for (i, t) in g.tribes.list.iter().take(2).enumerate() {
         let story = t.chronicle.join(" | ");
         assert!(story.contains("finished a campfire"), "{}: {story}", t.name);
-        assert!(t.beds >= 2, "{} should have built a hut with beds: {story}", t.name);
+        assert!(
+            t.beds >= 2,
+            "{} should have built a hut with beds: {story}",
+            t.name
+        );
         assert!(t.gone.is_none());
         // A day's results have shifted what it values.
-        let moved: f32 = (0..pw_tribe::FOCI).map(|f| (t.culture[f] - culture0[i][f]).abs()).sum();
+        let moved: f32 = (0..pw_tribe::FOCI)
+            .map(|f| (t.culture[f] - culture0[i][f]).abs())
+            .sum();
         assert!(moved > 0.0, "{} culture never changed", t.name);
     }
     // Their people are drawn and saved with everything else.
@@ -857,7 +1145,9 @@ fn tribes_settle_build_and_grow() {
 fn tribes_hunt_research_and_split() {
     let mut g = new_game(11);
     g.tribes = Default::default();
-    let id = g.found_tribe("core:forest_folk", None, 10).expect("tribe founded");
+    let id = g
+        .found_tribe("core:forest_folk", None, 10)
+        .expect("tribe founded");
     // Enough to eat for the band that leaves, and game to hunt.
     let center = g.tribes.get(id).unwrap().center;
     let content = g.content.clone();
@@ -865,15 +1155,25 @@ fn tribes_hunt_research_and_split() {
     {
         let t = g.tribes.list.iter_mut().find(|t| t.id == id).unwrap();
         t.techs.push("hunting".into());
-        t.colony.items.add(&g.world, &content, berries, 30, center.offset(3, 0));
+        t.colony
+            .items
+            .add(&g.world, &content, berries, 30, center.offset(3, 0));
     }
     let before = g.tribes.get(id).unwrap().culture;
     run(&mut g, DAY_TICKS as u32 + 10, |_| false);
     let parent = g.tribes.get(id).unwrap();
     let story = parent.chronicle.join(" | ");
-    let child = g.tribes.list.iter().find(|t| t.parent == Some(id)).unwrap_or_else(|| panic!("no daughter tribe: {story}"));
+    let child = g
+        .tribes
+        .list
+        .iter()
+        .find(|t| t.parent == Some(id))
+        .unwrap_or_else(|| panic!("no daughter tribe: {story}"));
     assert_eq!(child.generation, 1);
-    assert!(child.techs.contains(&"hunting".to_string()), "knowledge is passed on");
+    assert!(
+        child.techs.contains(&"hunting".to_string()),
+        "knowledge is passed on"
+    );
     assert!(child.members.len() >= 3);
     assert_ne!(child.culture, before, "a daughter culture mutates");
     assert!(parent.members.len() + child.members.len() >= 10);
@@ -881,12 +1181,176 @@ fn tribes_hunt_research_and_split() {
     let meat = content.items.idx("core:meat").unwrap();
     {
         let t = g.tribes.list.iter_mut().find(|t| t.id == id).unwrap();
-        let stacks: Vec<(u32, u32)> = t.colony.items.stacks.values().filter(|s| s.item == berries || s.item == meat).map(|s| (s.id, s.count)).collect();
+        let stacks: Vec<(u32, u32)> = t
+            .colony
+            .items
+            .stacks
+            .values()
+            .filter(|s| s.item == berries || s.item == meat)
+            .map(|s| (s.id, s.count))
+            .collect();
         for (s, n) in stacks {
             t.colony.items.take(s, n);
         }
+        // No foraging either (berry bushes may be close): hunting is the way to eat.
+        t.techs.retain(|x| x != "foraging");
     }
     g.spawn_group("core:rabbit", center.offset(6, 6), 6);
-    let caught = run(&mut g, DAY_TICKS as u32, |g| g.tribes.get(id).is_some_and(|t| t.hunted > 0));
-    assert!(caught, "hungry hunters should catch something: {}", g.tribes.get(id).unwrap().chronicle.join(" | "));
+    let caught = run(&mut g, DAY_TICKS as u32, |g| {
+        g.tribes.get(id).is_some_and(|t| t.hunted > 0)
+    });
+    assert!(
+        caught,
+        "hungry hunters should catch something: {}",
+        g.tribes.get(id).unwrap().chronicle.join(" | ")
+    );
+}
+
+/// Set every season to one temperature, with clear skies, so needs tests are steady.
+fn fixed_climate(g: &mut Game, temp: f32) {
+    let mut c = (*g.content).clone();
+    for s in &mut c.climate.seasons {
+        s.temp = temp;
+        s.swing = 0.0;
+    }
+    g.set_content(Arc::new(c));
+    g.env.biome_temp = 0.0;
+    g.env.temp = temp;
+    g.env.weather = "core:clear".into();
+    g.env.weather_until = u64::MAX;
+}
+
+#[test]
+fn hungry_colonists_eat_and_starve_without_food() {
+    let mut g = new_game(21);
+    fixed_climate(&mut g, 20.0);
+    let meals = g.meals();
+    assert!(meals > 5.0, "colony should land with food: {meals}");
+    let id = g.colony.pawns[0].id;
+    g.colony.pawns[0].needs.food = 0.1;
+    let ate = run(&mut g, 1200, |g| {
+        g.colony
+            .pawns
+            .iter()
+            .find(|p| p.id == id)
+            .is_some_and(|p| p.needs.food > 0.6)
+    });
+    assert!(
+        ate,
+        "hungry colonist did not eat: {}",
+        g.colony.pawns[0].activity()
+    );
+    assert!(g.meals() < meals, "food was not used up");
+
+    // Take all the food away: a starving colonist dies.
+    let food: Vec<u32> = g
+        .colony
+        .items
+        .stacks
+        .values()
+        .filter(|s| g.content.items.by_idx(s.item).nutrition > 0.0)
+        .map(|s| s.id)
+        .collect();
+    for s in food {
+        g.colony.items.take(s, u32::MAX);
+    }
+    let p = g.colony.pawns.iter_mut().find(|p| p.id == id).unwrap();
+    p.needs.food = 0.0;
+    p.needs.health = 0.05;
+    let died = run(&mut g, 2000, |g| g.colony.pawns.iter().all(|p| p.id != id));
+    assert!(died, "starving colonist did not die");
+    assert!(
+        g.log.iter().any(|m| m.contains("starved to death")),
+        "{:?}",
+        g.log
+    );
+    assert!(
+        g.log
+            .iter()
+            .any(|m| m.contains("no food") || m.contains("running low")),
+        "{:?}",
+        g.log
+    );
+}
+
+#[test]
+fn tired_colonists_sleep_in_beds() {
+    let mut g = new_game(22);
+    fixed_climate(&mut g, 20.0);
+    let home = g.spawn_tile();
+    clear_area(&mut g, home.offset(-6, -6), home.offset(6, 6));
+    let c = g.content.clone();
+    let bed = c.objects.idx("core:bed").unwrap();
+    let bt = home.offset(3, 3);
+    let bed_id = pw_objects::place(&mut g.world, &c, bed, bt.origin(), 1, true);
+    g.world.rebuild_tiles(&c);
+    let id = g.colony.pawns[0].id;
+    g.colony.pawns[0].needs.rest = 0.1;
+    let in_bed = run(&mut g, 900, |g| {
+        g.colony.pawns.iter().find(|p| p.id == id).is_some_and(|p| {
+            p.sleeping() && matches!(&p.job, Some(pw_colony::Job { kind: pw_colony::JobKind::Sleep { bed: Some(b), .. }, .. }) if *b == bed_id)
+        })
+    });
+    assert!(
+        in_bed,
+        "tired colonist did not go to bed: {}",
+        g.colony.pawns[0].activity()
+    );
+    let woke = run(&mut g, (DAY_TICKS / 2) as u32, |g| {
+        g.colony
+            .pawns
+            .iter()
+            .find(|p| p.id == id)
+            .is_some_and(|p| !p.sleeping())
+    });
+    assert!(woke, "colonist never woke up");
+    assert!(
+        g.colony
+            .pawns
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .needs
+            .rest
+            > 0.9
+    );
+}
+
+#[test]
+fn cold_colonists_warm_up_by_a_fire() {
+    let mut g = new_game(23);
+    fixed_climate(&mut g, -12.0);
+    let home = g.spawn_tile();
+    clear_area(&mut g, home.offset(-12, -12), home.offset(12, 12));
+    let c = g.content.clone();
+    let env = g.needs_env();
+    let open = pw_colony::felt_temp(&g.world, &c, home.offset(8, 0), &env);
+    let fire = c.objects.idx("core:campfire").unwrap();
+    let ft = home.offset(8, 0);
+    pw_objects::place(&mut g.world, &c, fire, ft.origin(), 1, true);
+    g.world.rebuild_tiles(&c);
+    let by_fire = pw_colony::felt_temp(&g.world, &c, home.offset(7, 0), &env);
+    assert!(
+        by_fire > open + 15.0,
+        "a campfire should warm the tiles next to it: {open} -> {by_fire}"
+    );
+
+    let id = g.colony.pawns[0].id;
+    g.colony.pawns[0].needs.warmth = 0.3;
+    let warmed = run(&mut g, 1500, |g| {
+        g.colony
+            .pawns
+            .iter()
+            .find(|p| p.id == id)
+            .is_some_and(|p| p.needs.warmth >= 0.9)
+    });
+    let p = g.colony.pawns.iter().find(|p| p.id == id).unwrap();
+    assert!(
+        warmed,
+        "cold colonist did not warm up: {} warmth {:.2} felt {:.0}",
+        p.activity(),
+        p.needs.warmth,
+        p.needs.felt
+    );
+    assert!(p.tile().chebyshev(ft) <= 4, "should have gone to the fire");
 }

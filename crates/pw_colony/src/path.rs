@@ -14,7 +14,9 @@ struct Node {
 impl Eq for Node {}
 impl Ord for Node {
     fn cmp(&self, o: &Self) -> Ordering {
-        o.f.partial_cmp(&self.f).unwrap_or(Ordering::Equal).then_with(|| self.t.cmp(&o.t))
+        o.f.partial_cmp(&self.f)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| self.t.cmp(&o.t))
     }
 }
 impl PartialOrd for Node {
@@ -45,7 +47,10 @@ pub fn find_path(
     let mut open = BinaryHeap::new();
     let mut came: FastMap<TilePos, (f32, TilePos)> = FastMap::default();
     came.insert(start, (0.0, start));
-    open.push(Node { f: octile(start, hint), t: start });
+    open.push(Node {
+        f: octile(start, hint),
+        t: start,
+    });
     let mut expanded = 0;
     while let Some(Node { t, .. }) = open.pop() {
         if goal(t) && t != start {
@@ -65,20 +70,39 @@ pub fn find_path(
             return None;
         }
         let g = came[&t].0;
-        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+        for (dx, dy) in [
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
+        ] {
             let n = t.offset(dx, dy);
             let Some(info) = world.tile(n) else { continue };
             if !info.walkable {
                 continue;
             }
-            if dx != 0 && dy != 0 && !(world.walkable(t.offset(dx, 0)) && world.walkable(t.offset(0, dy))) {
+            if dx != 0
+                && dy != 0
+                && !(world.walkable(t.offset(dx, 0)) && world.walkable(t.offset(0, dy)))
+            {
                 continue;
             }
-            let step = if dx != 0 && dy != 0 { std::f32::consts::SQRT_2 } else { 1.0 };
+            let step = if dx != 0 && dy != 0 {
+                std::f32::consts::SQRT_2
+            } else {
+                1.0
+            };
             let ng = g + step * info.cost.max(0.1);
             if came.get(&n).is_none_or(|&(og, _)| ng < og) {
                 came.insert(n, (ng, t));
-                open.push(Node { f: ng + octile(n, hint), t: n });
+                open.push(Node {
+                    f: ng + octile(n, hint),
+                    t: n,
+                });
             }
         }
     }
@@ -125,16 +149,32 @@ pub fn find_nearest<T>(
         if expanded > max_nodes {
             return None;
         }
-        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+        for (dx, dy) in [
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
+        ] {
             let n = t.offset(dx, dy);
             let Some(info) = world.tile(n) else { continue };
             if !info.walkable {
                 continue;
             }
-            if dx != 0 && dy != 0 && !(world.walkable(t.offset(dx, 0)) && world.walkable(t.offset(0, dy))) {
+            if dx != 0
+                && dy != 0
+                && !(world.walkable(t.offset(dx, 0)) && world.walkable(t.offset(0, dy)))
+            {
                 continue;
             }
-            let step = if dx != 0 && dy != 0 { std::f32::consts::SQRT_2 } else { 1.0 };
+            let step = if dx != 0 && dy != 0 {
+                std::f32::consts::SQRT_2
+            } else {
+                1.0
+            };
             let ng = g + step * info.cost.max(0.1);
             if came.get(&n).is_none_or(|&(og, _)| ng < og) {
                 came.insert(n, (ng, t));
