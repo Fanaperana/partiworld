@@ -84,13 +84,7 @@ pub struct DataEditor {
 
 impl Default for DataEditor {
     fn default() -> Self {
-        Self {
-            kind: Kind::Materials,
-            filter: String::new(),
-            selected: None,
-            text: String::new(),
-            status: String::new(),
-        }
+        Self { kind: Kind::Materials, filter: String::new(), selected: None, text: String::new(), status: String::new() }
     }
 }
 
@@ -99,9 +93,7 @@ fn ids<T: Def>(r: &Registry<T>) -> Vec<String> {
 }
 
 fn text_of<T: Def + Serialize>(r: &Registry<T>, id: &str) -> String {
-    r.get(id)
-        .map(|d| pw_mods::to_ron(d).unwrap_or_else(|e| format!("// {e}")))
-        .unwrap_or_default()
+    r.get(id).map(|d| pw_mods::to_ron(d).unwrap_or_else(|e| format!("// {e}"))).unwrap_or_default()
 }
 
 fn put<T: Def + DeserializeOwned>(r: &mut Registry<T>, text: &str) -> Result<String, String> {
@@ -114,10 +106,7 @@ fn put<T: Def + DeserializeOwned>(r: &mut Registry<T>, text: &str) -> Result<Str
 impl DataEditor {
     fn list(&self, c: &Content) -> Vec<String> {
         match self.kind {
-            Kind::Materials => ids(&c.materials)
-                .into_iter()
-                .filter(|i| i != NONE_ID)
-                .collect(),
+            Kind::Materials => ids(&c.materials).into_iter().filter(|i| i != NONE_ID).collect(),
             Kind::Items => ids(&c.items),
             Kind::Objects => ids(&c.objects),
             Kind::Biomes => ids(&c.biomes),

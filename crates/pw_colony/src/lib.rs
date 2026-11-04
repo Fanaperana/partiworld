@@ -55,14 +55,7 @@ impl Items {
     }
 
     /// Drop items near a tile, filling existing stacks first, spreading out as needed.
-    pub fn add(
-        &mut self,
-        world: &World,
-        content: &Content,
-        item: usize,
-        mut count: u32,
-        near: TilePos,
-    ) {
+    pub fn add(&mut self, world: &World, content: &Content, item: usize, mut count: u32, near: TilePos) {
         let max = content.item_rt[item].stack;
         let mut guard = 0;
         while count > 0 && guard < 64 {
@@ -78,11 +71,7 @@ impl Items {
             if let Some(&id) = self.by_tile.get(&t) {
                 let s = self.stacks.get_mut(&id).unwrap();
                 if s.item == item {
-                    let add = if found.is_some() {
-                        (max - s.count.min(max)).min(count)
-                    } else {
-                        count
-                    };
+                    let add = if found.is_some() { (max - s.count.min(max)).min(count) } else { count };
                     s.count += add;
                     count -= add;
                     continue;
@@ -91,16 +80,7 @@ impl Items {
             self.next += 1;
             let n = count.min(max);
             let id = self.next;
-            self.stacks.insert(
-                id,
-                ItemStack {
-                    id,
-                    item,
-                    count: n,
-                    tile: t,
-                    reserved: None,
-                },
-            );
+            self.stacks.insert(id, ItemStack { id, item, count: n, tile: t, reserved: None });
             self.by_tile.insert(t, id);
             count -= n;
         }
@@ -108,9 +88,7 @@ impl Items {
 
     /// Take up to `n` from a stack. Returns how many were taken.
     pub fn take(&mut self, id: u32, n: u32) -> u32 {
-        let Some(s) = self.stacks.get_mut(&id) else {
-            return 0;
-        };
+        let Some(s) = self.stacks.get_mut(&id) else { return 0 };
         let got = s.count.min(n);
         s.count -= got;
         if s.count == 0 {
@@ -124,11 +102,7 @@ impl Items {
     }
 
     pub fn total(&self, item: usize) -> u32 {
-        self.stacks
-            .values()
-            .filter(|s| s.item == item)
-            .map(|s| s.count)
-            .sum()
+        self.stacks.values().filter(|s| s.item == item).map(|s| s.count).sum()
     }
 }
 
@@ -166,9 +140,7 @@ pub struct Blueprint {
 
 impl Blueprint {
     pub fn needs(&self, content: &Content) -> Vec<(usize, u32)> {
-        let Some(b) = &content.protos[self.def].build else {
-            return Vec::new();
-        };
+        let Some(b) = &content.protos[self.def].build else { return Vec::new() };
         b.cost
             .iter()
             .enumerate()
@@ -179,13 +151,8 @@ impl Blueprint {
             .collect()
     }
     pub fn ready(&self, content: &Content) -> bool {
-        let Some(b) = &content.protos[self.def].build else {
-            return true;
-        };
-        b.cost
-            .iter()
-            .enumerate()
-            .all(|(i, &(_, n))| self.delivered[i] >= n)
+        let Some(b) = &content.protos[self.def].build else { return true };
+        b.cost.iter().enumerate().all(|(i, &(_, n))| self.delivered[i] >= n)
     }
 }
 
@@ -194,43 +161,20 @@ impl Blueprint {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum JobKind {
     /// Work a designation (fell, mine, harvest, deconstruct, plant).
-    Work {
-        at: TilePos,
-        driver: JobDriver,
-    },
-    HaulToStockpile {
-        stack: u32,
-        dest: TilePos,
-    },
+    Work { at: TilePos, driver: JobDriver },
+    HaulToStockpile { stack: u32, dest: TilePos },
     /// Pick up one stack and drop it off at several blueprints (stage 1 + i = going to drop i).
-    Supply {
-        stack: u32,
-        item: usize,
-        drops: Vec<(u32, u32)>,
-    },
+    Supply { stack: u32, item: usize, drops: Vec<(u32, u32)> },
     /// Put what the pawn already carries in the stockpile.
-    Store {
-        dest: TilePos,
-    },
-    Construct {
-        bp: u32,
-    },
-    Wander {
-        dest: TilePos,
-    },
+    Store { dest: TilePos },
+    Construct { bp: u32 },
+    Wander { dest: TilePos },
     /// Walk to a food stack and eat from it.
-    Eat {
-        stack: u32,
-    },
+    Eat { stack: u32 },
     /// Sleep at `at`, in `bed` if there is one.
-    Sleep {
-        bed: Option<ObjId>,
-        at: TilePos,
-    },
+    Sleep { bed: Option<ObjId>, at: TilePos },
     /// Stand somewhere warm until warmed up.
-    Warm {
-        at: TilePos,
-    },
+    Warm { at: TilePos },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -279,14 +223,7 @@ pub struct Needs {
 
 impl Default for Needs {
     fn default() -> Self {
-        Self {
-            food: 1.0,
-            rest: 1.0,
-            warmth: 1.0,
-            health: 1.0,
-            felt: 15.0,
-            warm_retry: 0,
-        }
+        Self { food: 1.0, rest: 1.0, warmth: 1.0, health: 1.0, felt: 15.0, warm_retry: 0 }
     }
 }
 
@@ -337,9 +274,7 @@ const HEAT_RANGE: i32 = 4;
 /// Shelter from wind and rain: a roof over the tile.
 pub fn roofed(world: &World, content: &Content, t: TilePos) -> bool {
     let (x, y) = t.origin();
-    content
-        .mat_rt(world.get(x + TILE / 2, y + TILE / 2, Layer::Overlay))
-        .roof
+    content.mat_rt(world.get(x + TILE / 2, y + TILE / 2, Layer::Overlay)).roof
 }
 
 /// Heat given off by one tile's particles (every other particle is sampled).
@@ -399,9 +334,7 @@ pub fn felt_temp(world: &World, content: &Content, t: TilePos, env: &NeedsEnv) -
 
 fn on_hot(world: &World, content: &Content, pos: (f32, f32)) -> bool {
     let (x, y) = (pos.0 as i32, pos.1 as i32);
-    [Layer::Floor, Layer::Solid, Layer::Overlay]
-        .iter()
-        .any(|&l| content.mat_rt(world.get(x, y, l)).hot)
+    [Layer::Floor, Layer::Solid, Layer::Overlay].iter().any(|&l| content.mat_rt(world.get(x, y, l)).hot)
 }
 
 impl Pawn {
@@ -422,20 +355,10 @@ impl Pawn {
         tile_of_f(self.pos.0, self.pos.1)
     }
     pub fn activity(&self) -> &str {
-        self.job
-            .as_ref()
-            .map(|j| j.label.as_str())
-            .unwrap_or("Idle")
+        self.job.as_ref().map(|j| j.label.as_str()).unwrap_or("Idle")
     }
     pub fn sleeping(&self) -> bool {
-        matches!(
-            &self.job,
-            Some(Job {
-                kind: JobKind::Sleep { .. },
-                stage: 1,
-                ..
-            })
-        )
+        matches!(&self.job, Some(Job { kind: JobKind::Sleep { .. }, stage: 1, .. }))
     }
     /// Walking speed factor from exhaustion and wounds.
     pub fn pace(&self) -> f32 {
@@ -453,26 +376,12 @@ impl Pawn {
 /// Things the game turns into script hooks.
 #[derive(Clone, Debug)]
 pub enum ColonyEvent {
-    Destroyed {
-        def: usize,
-        center: (i32, i32),
-    },
-    Harvested {
-        def: usize,
-        center: (i32, i32),
-    },
-    Built {
-        def: usize,
-        center: (i32, i32),
-        id: ObjId,
-    },
+    Destroyed { def: usize, center: (i32, i32) },
+    Harvested { def: usize, center: (i32, i32) },
+    Built { def: usize, center: (i32, i32), id: ObjId },
     Message(String),
     /// A colonist died of its needs (`cause`: "starved", "froze", "burned").
-    Died {
-        name: String,
-        cause: &'static str,
-        at: TilePos,
-    },
+    Died { name: String, cause: &'static str, at: TilePos },
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -513,9 +422,7 @@ fn near(t: TilePos, blocks_center: bool) -> impl Fn(TilePos) -> bool + Copy {
 
 /// Tiles a pawn can stand on to work at `t`.
 fn stand_tiles(t: TilePos, blocks_center: bool) -> impl Iterator<Item = TilePos> {
-    (-1..=1)
-        .flat_map(move |dy| (-1..=1).map(move |dx| t.offset(dx, dy)))
-        .filter(move |&p| !(blocks_center && p == t))
+    (-1..=1).flat_map(move |dy| (-1..=1).map(move |dx| t.offset(dx, dy))).filter(move |&p| !(blocks_center && p == t))
 }
 
 /// What a construct search can land on.
@@ -554,23 +461,11 @@ impl Colony {
 
     /// Take a pawn out of the colony (death, leaving): its job is let go and
     /// anything it carried is dropped where it stands.
-    pub fn remove_pawn(
-        &mut self,
-        world: &mut World,
-        content: &Content,
-        rng: &mut Rng,
-        id: u32,
-    ) -> Option<Pawn> {
+    pub fn remove_pawn(&mut self, world: &mut World, content: &Content, rng: &mut Rng, id: u32) -> Option<Pawn> {
         let i = self.pawns.iter().position(|p| p.id == id)?;
         let mut pawn = self.pawns.remove(i);
         let mut events = Vec::new();
-        let mut ctx = Ctx {
-            world,
-            content,
-            rng,
-            events: &mut events,
-            walk: 1.0,
-        };
+        let mut ctx = Ctx { world, content, rng, events: &mut events, walk: 1.0 };
         self.end_job(&mut pawn, &mut ctx, false);
         if let Some((item, n)) = pawn.carrying.take() {
             self.items.add(world, content, item, n, pawn.tile());
@@ -588,13 +483,7 @@ impl Colony {
         self.next_pawn
     }
 
-    pub fn spawn_pawn(
-        &mut self,
-        content: &Content,
-        creature: usize,
-        tile: TilePos,
-        rng: &mut Rng,
-    ) -> u32 {
+    pub fn spawn_pawn(&mut self, content: &Content, creature: usize, tile: TilePos, rng: &mut Rng) -> u32 {
         let def = content.creatures.by_idx(creature);
         self.next_pawn += 1;
         let name = if def.names.is_empty() {
@@ -605,16 +494,7 @@ impl Colony {
         let slots = def
             .slots
             .iter()
-            .map(|(k, v)| {
-                (
-                    k.clone(),
-                    if v.is_empty() {
-                        "#ff00ff".into()
-                    } else {
-                        v[rng.below(v.len())].clone()
-                    },
-                )
-            })
+            .map(|(k, v)| (k.clone(), if v.is_empty() { "#ff00ff".into() } else { v[rng.below(v.len())].clone() }))
             .collect();
         let (x, y) = tile.center();
         self.pawns.push(Pawn {
@@ -632,44 +512,28 @@ impl Colony {
     // ------------------------------------------------------------ player orders
 
     /// Mark work in a rectangle. Returns how many designations were added.
-    pub fn designate(
-        &mut self,
-        world: &World,
-        content: &Content,
-        job: usize,
-        rect: TileRect,
-        plant: Option<usize>,
-    ) -> usize {
+    pub fn designate(&mut self, world: &World, content: &Content, job: usize, rect: TileRect, plant: Option<usize>) -> usize {
         let jd = content.jobs.by_idx(job);
         let mut added = 0;
         match jd.driver {
             JobDriver::Fell | JobDriver::Harvest | JobDriver::Deconstruct => {
-                for o in world.objects_in_rect(rect) {
-                    let Some(inst) = world.objects.get(o) else {
-                        continue;
-                    };
-                    let proto = &content.protos[inst.def];
-                    let ok = match jd.driver {
-                        JobDriver::Deconstruct => inst.built,
-                        JobDriver::Harvest => {
-                            tags_match(&jd.targets, &proto.tags)
-                                && objs::has_yield(world, content, o)
+                {
+                    for o in world.objects_in_rect(rect) {
+                        let Some(inst) = world.objects.get(o) else { continue };
+                        let proto = &content.protos[inst.def];
+                        let ok = match jd.driver {
+                            JobDriver::Deconstruct => inst.built,
+                            JobDriver::Harvest => tags_match(&jd.targets, &proto.tags) && objs::has_yield(world, content, o),
+                            _ => !inst.built && tags_match(&jd.targets, &proto.tags),
+                        };
+                        if !ok {
+                            continue;
                         }
-                        _ => !inst.built && tags_match(&jd.targets, &proto.tags),
-                    };
-                    if !ok {
-                        continue;
-                    }
-                    let key = inst.origin_tile();
-                    if let std::collections::btree_map::Entry::Vacant(e) =
-                        self.designations.entry(key)
-                    {
-                        e.insert(Designation {
-                            job,
-                            target: DesTarget::Object(o),
-                            reserved: None,
-                        });
-                        added += 1;
+                        let key = inst.origin_tile();
+                        if let std::collections::btree_map::Entry::Vacant(e) = self.designations.entry(key) {
+                            e.insert(Designation { job, target: DesTarget::Object(o), reserved: None });
+                            added += 1;
+                        }
                     }
                 }
             }
@@ -679,14 +543,7 @@ impl Colony {
                         continue;
                     }
                     if mineable_cell(world, content, t, &jd.targets).is_some() {
-                        self.designations.insert(
-                            t,
-                            Designation {
-                                job,
-                                target: DesTarget::Tile,
-                                reserved: None,
-                            },
-                        );
+                        self.designations.insert(t, Designation { job, target: DesTarget::Tile, reserved: None });
                         added += 1;
                     }
                 }
@@ -699,20 +556,10 @@ impl Colony {
                     }
                     let soil = World::tile_cells(t).all(|(x, y)| {
                         world.get(x, y, Layer::Solid) == NONE_MAT
-                            && tags_match(
-                                &jd.targets,
-                                &content.mat_rt(world.get(x, y, Layer::Floor)).tags,
-                            )
+                            && tags_match(&jd.targets, &content.mat_rt(world.get(x, y, Layer::Floor)).tags)
                     });
                     if soil {
-                        self.designations.insert(
-                            t,
-                            Designation {
-                                job,
-                                target: DesTarget::Plant(def),
-                                reserved: None,
-                            },
-                        );
+                        self.designations.insert(t, Designation { job, target: DesTarget::Plant(def), reserved: None });
                         added += 1;
                     }
                 }
@@ -725,27 +572,19 @@ impl Colony {
     /// Remove designations and blueprints in a rectangle (blueprint materials are dropped back).
     pub fn cancel(&mut self, world: &mut World, content: &Content, rect: TileRect) {
         self.designations.retain(|t, _| !rect.contains(*t));
-        let gone: Vec<u32> = self
-            .blueprints
-            .values()
-            .filter(|b| rect.contains(b.tile))
-            .map(|b| b.id)
-            .collect();
+        let gone: Vec<u32> = self.blueprints.values().filter(|b| rect.contains(b.tile)).map(|b| b.id).collect();
         for id in gone {
             self.remove_blueprint(world, content, id, true);
         }
     }
 
     fn remove_blueprint(&mut self, world: &mut World, content: &Content, id: u32, refund: bool) {
-        let Some(bp) = self.blueprints.remove(&id) else {
-            return;
-        };
+        let Some(bp) = self.blueprints.remove(&id) else { return };
         if refund {
             if let Some(b) = &content.protos[bp.def].build {
                 for (i, &(item, _)) in b.cost.iter().enumerate() {
                     if bp.delivered[i] > 0 {
-                        self.items
-                            .add(world, content, item, bp.delivered[i], bp.tile);
+                        self.items.add(world, content, item, bp.delivered[i], bp.tile);
                     }
                 }
             }
@@ -768,23 +607,10 @@ impl Colony {
     }
 
     /// Queue a building. Returns false if it cannot go there.
-    pub fn place_blueprint(
-        &mut self,
-        world: &World,
-        content: &Content,
-        def: usize,
-        tile: TilePos,
-        seed: u64,
-    ) -> Result<(), String> {
+    pub fn place_blueprint(&mut self, world: &World, content: &Content, def: usize, tile: TilePos, seed: u64) -> Result<(), String> {
         let proto = &content.protos[def];
-        let Some(build) = &proto.build else {
-            return Err("not buildable".into());
-        };
-        if self
-            .blueprints
-            .values()
-            .any(|b| b.tile == tile && content.protos[b.def].needs_support == proto.needs_support)
-        {
+        let Some(build) = &proto.build else { return Err("not buildable".into()) };
+        if self.blueprints.values().any(|b| b.tile == tile && content.protos[b.def].needs_support == proto.needs_support) {
             return Err("already planned".into());
         }
         // Roofs need a wall or rock nearby, built or planned.
@@ -842,27 +668,14 @@ impl Colony {
     // ------------------------------------------------------------ simulation
 
     /// `walk` scales walking speed (snow).
-    pub fn tick(
-        &mut self,
-        world: &mut World,
-        content: &Content,
-        rng: &mut Rng,
-        tick: u64,
-        walk: f32,
-    ) -> Vec<ColonyEvent> {
+    pub fn tick(&mut self, world: &mut World, content: &Content, rng: &mut Rng, tick: u64, walk: f32) -> Vec<ColonyEvent> {
         let mut events = Vec::new();
         if tick % 30 == 0 {
             self.cleanup(world, content);
         }
         for i in 0..self.pawns.len() {
             let mut pawn = std::mem::take(&mut self.pawns[i]);
-            let mut ctx = Ctx {
-                world,
-                content,
-                rng,
-                events: &mut events,
-                walk,
-            };
+            let mut ctx = Ctx { world, content, rng, events: &mut events, walk };
             self.tick_pawn(&mut pawn, &mut ctx);
             self.pawns[i] = pawn;
         }
@@ -874,8 +687,7 @@ impl Colony {
         self.designations.retain(|t, d| match &d.target {
             DesTarget::Object(o) => world.objects.get(*o).is_some(),
             DesTarget::Tile => {
-                mineable_cell(world, content, *t, &content.jobs.by_idx(d.job).targets).is_some()
-                    || !world.is_loaded(t.origin().0, t.origin().1)
+                mineable_cell(world, content, *t, &content.jobs.by_idx(d.job).targets).is_some() || !world.is_loaded(t.origin().0, t.origin().1)
             }
             DesTarget::Plant(_) => true,
         });
@@ -883,19 +695,14 @@ impl Colony {
             .items
             .stacks
             .values()
-            .filter(|s| {
-                world.chunk(s.tile.chunk()).is_some()
-                    && !world.walkable(s.tile)
-                    && s.reserved.is_none()
-            })
+            .filter(|s| world.chunk(s.tile.chunk()).is_some() && !world.walkable(s.tile) && s.reserved.is_none())
             .map(|s| (s.id, s.item, s.count, s.tile))
             .collect();
         for (id, item, count, tile) in stuck {
             self.items.take(id, count);
             self.items.add(world, content, item, count, tile);
         }
-        self.stockpile
-            .retain(|t| world.chunk(t.chunk()).is_none() || world.walkable(*t));
+        self.stockpile.retain(|t| world.chunk(t.chunk()).is_none() || world.walkable(*t));
     }
 
     fn tick_pawn(&mut self, pawn: &mut Pawn, ctx: &mut Ctx) {
@@ -934,12 +741,7 @@ impl Colony {
                     let dy = ctx.rng.range_i32(-5, 5);
                     let dest = start.offset(dx, dy);
                     if ctx.world.walkable(dest) {
-                        pawn.job = Some(Job {
-                            kind: JobKind::Wander { dest },
-                            stage: 0,
-                            timer: 0.0,
-                            label: "Wandering".into(),
-                        });
+                        pawn.job = Some(Job { kind: JobKind::Wander { dest }, stage: 0, timer: 0.0, label: "Wandering".into() });
                     }
                 }
                 return;
@@ -990,10 +792,7 @@ impl Colony {
     }
 
     fn cost_index(content: &Content, def: usize, item: usize) -> Option<usize> {
-        content.protos[def]
-            .build
-            .as_ref()
-            .and_then(|b| b.cost.iter().position(|c| c.0 == item))
+        content.protos[def].build.as_ref().and_then(|b| b.cost.iter().position(|c| c.0 == item))
     }
 
     fn uncount_incoming(&mut self, content: &Content, bp: u32, item: usize, n: u32) {
@@ -1020,12 +819,8 @@ impl Colony {
 
     /// Move one tick along the path. Returns true when the path is finished.
     fn walk(pawn: &mut Pawn, ctx: &mut Ctx) -> Result<bool, ()> {
-        let Some(&next) = pawn.path.last() else {
-            return Ok(true);
-        };
-        let Some(info) = ctx.world.tile(next) else {
-            return Err(());
-        };
+        let Some(&next) = pawn.path.last() else { return Ok(true) };
+        let Some(info) = ctx.world.tile(next) else { return Err(()) };
         if !info.walkable {
             return Err(());
         }
@@ -1051,13 +846,7 @@ impl Colony {
 
     fn path_to(pawn: &mut Pawn, ctx: &Ctx, goal: impl Fn(TilePos) -> bool, hint: TilePos) -> bool {
         let w = &*ctx.world;
-        match find_path(
-            w,
-            pawn.tile(),
-            |t| goal(t) && w.walkable(t),
-            hint,
-            MAX_PATH_NODES,
-        ) {
+        match find_path(w, pawn.tile(), |t| goal(t) && w.walkable(t), hint, MAX_PATH_NODES) {
             Some(p) => {
                 pawn.path = p;
                 true
@@ -1121,13 +910,7 @@ impl Colony {
         None
     }
 
-    fn find_designation(
-        &mut self,
-        pawn: &mut Pawn,
-        ctx: &mut Ctx,
-        job: usize,
-        here: TilePos,
-    ) -> Option<Job> {
+    fn find_designation(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, job: usize, here: TilePos) -> Option<Job> {
         let jd = ctx.content.jobs.by_idx(job);
         let mut goals: HashMap<TilePos, TilePos> = HashMap::new();
         let mut hint: Option<(i32, TilePos)> = None;
@@ -1136,11 +919,7 @@ impl Colony {
                 continue;
             }
             let blocks = match &d.target {
-                DesTarget::Object(o) => ctx
-                    .world
-                    .objects
-                    .get(*o)
-                    .is_some_and(|i| ctx.content.protos[i.def].blocks),
+                DesTarget::Object(o) => ctx.world.objects.get(*o).is_some_and(|i| ctx.content.protos[i.def].blocks),
                 DesTarget::Tile => true,
                 DesTarget::Plant(_) => false,
             };
@@ -1154,15 +933,7 @@ impl Colony {
         }
         let t = Self::search(pawn, ctx, &goals, |_, _| true, hint?.1)?;
         self.designations.get_mut(&t).unwrap().reserved = Some(pawn.id);
-        Some(Job {
-            kind: JobKind::Work {
-                at: t,
-                driver: jd.driver,
-            },
-            stage: 0,
-            timer: 0.0,
-            label: jd.label.clone(),
-        })
+        Some(Job { kind: JobKind::Work { at: t, driver: jd.driver }, stage: 0, timer: 0.0, label: jd.label.clone() })
     }
 
     /// Builders either build a blueprint that has its materials, or bring
@@ -1172,12 +943,8 @@ impl Colony {
         let mut hint: Option<(i32, TilePos)> = None;
         let mut needed: BTreeSet<usize> = BTreeSet::new();
         // Unbuilt walls, so builders do not close themselves in.
-        let walls: BTreeSet<TilePos> = self
-            .blueprints
-            .values()
-            .filter(|b| ctx.content.protos[b.def].blocks)
-            .map(|b| b.tile)
-            .collect();
+        let walls: BTreeSet<TilePos> =
+            self.blueprints.values().filter(|b| ctx.content.protos[b.def].blocks).map(|b| b.tile).collect();
         for b in self.blueprints.values() {
             for (item, _) in b.needs(ctx.content) {
                 needed.insert(item);
@@ -1219,32 +986,16 @@ impl Colony {
             BuildCand::Stack(_) => true,
             BuildCand::Build(id) => {
                 // For walls: stand where you are not shut in.
-                let blocks = blueprints
-                    .get(&id)
-                    .is_some_and(|b| content.protos[b.def].blocks);
-                !blocks
-                    || *open
-                        .borrow_mut()
-                        .entry(t)
-                        .or_insert_with(|| open_area(world, &walls, t, 120))
+                let blocks = blueprints.get(&id).is_some_and(|b| content.protos[b.def].blocks);
+                !blocks || *open.borrow_mut().entry(t).or_insert_with(|| open_area(world, &walls, t, 120))
             }
         };
         let found = Self::search(pawn, ctx, &goals, ok, hint)?;
         match found {
             BuildCand::Build(id) => {
                 self.blueprints.get_mut(&id).unwrap().reserved = Some(pawn.id);
-                let name = ctx
-                    .content
-                    .objects
-                    .by_idx(self.blueprints[&id].def)
-                    .name
-                    .clone();
-                Some(Job {
-                    kind: JobKind::Construct { bp: id },
-                    stage: 0,
-                    timer: 0.0,
-                    label: format!("Building {name}"),
-                })
+                let name = ctx.content.objects.by_idx(self.blueprints[&id].def).name.clone();
+                Some(Job { kind: JobKind::Construct { bp: id }, stage: 0, timer: 0.0, label: format!("Building {name}") })
             }
             BuildCand::Stack(sid) => self.plan_supply(pawn, ctx, sid),
         }
@@ -1257,19 +1008,10 @@ impl Colony {
         let mut wants: Vec<(TilePos, u32, u32)> = self
             .blueprints
             .values()
-            .filter_map(|b| {
-                b.needs(ctx.content)
-                    .into_iter()
-                    .find(|n| n.0 == s.item)
-                    .map(|n| (b.tile, b.id, n.1))
-            })
+            .filter_map(|b| b.needs(ctx.content).into_iter().find(|n| n.0 == s.item).map(|n| (b.tile, b.id, n.1)))
             .collect();
         // Nearest blueprint to the stack first, then the ones closest to that one.
-        let Some(first) = wants
-            .iter()
-            .min_by_key(|w| w.0.manhattan(s.tile))
-            .map(|w| w.0)
-        else {
+        let Some(first) = wants.iter().min_by_key(|w| w.0.manhattan(s.tile)).map(|w| w.0) else {
             pawn.path.clear();
             return None;
         };
@@ -1292,11 +1034,7 @@ impl Colony {
         self.items.stacks.get_mut(&sid).unwrap().reserved = Some(pawn.id);
         let name = ctx.content.items.by_idx(s.item).name.clone();
         Some(Job {
-            kind: JobKind::Supply {
-                stack: sid,
-                item: s.item,
-                drops,
-            },
+            kind: JobKind::Supply { stack: sid, item: s.item, drops },
             stage: 0,
             timer: 0.0,
             label: format!("Hauling {name} to build"),
@@ -1315,12 +1053,7 @@ impl Colony {
             return None;
         }
         let name = ctx.content.items.by_idx(item).name.clone();
-        Some(Job {
-            kind: JobKind::Store { dest },
-            stage: 0,
-            timer: 0.0,
-            label: format!("Storing {name}"),
-        })
+        Some(Job { kind: JobKind::Store { dest }, stage: 0, timer: 0.0, label: format!("Storing {name}") })
     }
 
     /// Loose items to stockpiles.
@@ -1353,12 +1086,7 @@ impl Colony {
         let dest = self.free_stockpile_tile(ctx, item, tile)?;
         self.items.stacks.get_mut(&sid).unwrap().reserved = Some(pawn.id);
         let name = ctx.content.items.by_idx(item).name.clone();
-        Some(Job {
-            kind: JobKind::HaulToStockpile { stack: sid, dest },
-            stage: 0,
-            timer: 0.0,
-            label: format!("Hauling {name}"),
-        })
+        Some(Job { kind: JobKind::HaulToStockpile { stack: sid, dest }, stage: 0, timer: 0.0, label: format!("Hauling {name}") })
     }
 
     fn free_stockpile_tile(&self, ctx: &Ctx, item: usize, from: TilePos) -> Option<TilePos> {
@@ -1367,10 +1095,7 @@ impl Colony {
             .pawns
             .iter()
             .filter_map(|p| match &p.job {
-                Some(Job {
-                    kind: JobKind::HaulToStockpile { dest, .. },
-                    ..
-                }) => Some(*dest),
+                Some(Job { kind: JobKind::HaulToStockpile { dest, .. }, .. }) => Some(*dest),
                 _ => None,
             })
             .collect();
@@ -1386,11 +1111,7 @@ impl Colony {
             if ok {
                 let d = t.manhattan(from);
                 // Prefer topping up existing stacks.
-                let d = if self.items.at(t).is_some() {
-                    d - 1000
-                } else {
-                    d
-                };
+                let d = if self.items.at(t).is_some() { d - 1000 } else { d };
                 if best.is_none_or(|(bd, _)| d < bd) {
                     best = Some((d, t));
                 }
@@ -1402,9 +1123,7 @@ impl Colony {
     // ------------------------------------------------------------ job execution
 
     fn run_job(&mut self, pawn: &mut Pawn, ctx: &mut Ctx) -> Step {
-        let Some(job) = pawn.job.clone() else {
-            return Step::Done;
-        };
+        let Some(job) = pawn.job.clone() else { return Step::Done };
         let step = match &job.kind {
             JobKind::Wander { .. } => match Self::walk(pawn, ctx) {
                 Ok(true) | Err(()) => {
@@ -1423,12 +1142,8 @@ impl Colony {
                 Ok(false) => Step::Continue,
             },
             JobKind::Work { at, driver } => self.run_work(pawn, ctx, *at, *driver, job.stage),
-            JobKind::HaulToStockpile { stack, dest } => {
-                self.run_haul_stockpile(pawn, ctx, *stack, *dest, job.stage)
-            }
-            JobKind::Supply { stack, item, drops } => {
-                self.run_supply(pawn, ctx, *stack, *item, drops, job.stage)
-            }
+            JobKind::HaulToStockpile { stack, dest } => self.run_haul_stockpile(pawn, ctx, *stack, *dest, job.stage),
+            JobKind::Supply { stack, item, drops } => self.run_supply(pawn, ctx, *stack, *item, drops, job.stage),
             JobKind::Store { dest } => {
                 let dest = *dest;
                 match Self::follow(pawn, ctx, move |t| t == dest, dest) {
@@ -1449,9 +1164,7 @@ impl Colony {
     }
 
     fn run_eat(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, stack: u32, stage: u8) -> Step {
-        let Some(s) = self.items.get(stack) else {
-            return Step::Fail("food gone");
-        };
+        let Some(s) = self.items.get(stack) else { return Step::Fail("food gone") };
         let (tile, item) = (s.tile, s.item);
         if stage == 0 {
             return match Self::follow(pawn, ctx, move |t| t == tile, tile) {
@@ -1475,20 +1188,10 @@ impl Colony {
         }
         let nutrition = ctx.content.items.by_idx(item).nutrition;
         pawn.needs.food = (pawn.needs.food + nutrition).min(1.0);
-        if pawn.needs.food >= 0.9 || self.items.get(stack).is_none() {
-            Step::Done
-        } else {
-            Step::Continue
-        }
+        if pawn.needs.food >= 0.9 || self.items.get(stack).is_none() { Step::Done } else { Step::Continue }
     }
 
-    fn run_sleep(
-        pawn: &mut Pawn,
-        ctx: &mut Ctx,
-        bed: Option<ObjId>,
-        at: TilePos,
-        stage: u8,
-    ) -> Step {
+    fn run_sleep(pawn: &mut Pawn, ctx: &mut Ctx, bed: Option<ObjId>, at: TilePos, stage: u8) -> Step {
         if stage == 0 {
             return match Self::follow(pawn, ctx, move |t| t == at, at) {
                 Ok(true) => {
@@ -1498,10 +1201,7 @@ impl Colony {
                     // Lie down on the bed itself.
                     if let Some(o) = bed.and_then(|b| ctx.world.objects.get(b)) {
                         let (min, max) = (o.min, o.max);
-                        pawn.pos = (
-                            (min.0 + max.0) as f32 / 2.0 + 0.5,
-                            (min.1 + max.1) as f32 / 2.0 + 0.5,
-                        );
+                        pawn.pos = ((min.0 + max.0) as f32 / 2.0 + 0.5, (min.1 + max.1) as f32 / 2.0 + 0.5);
                     }
                     Step::Continue
                 }
@@ -1513,11 +1213,7 @@ impl Colony {
             return Step::Fail("bed gone");
         }
         // Rest itself is restored in `tick_needs`; wake when rested.
-        if pawn.needs.rest >= 1.0 {
-            Step::Done
-        } else {
-            Step::Continue
-        }
+        if pawn.needs.rest >= 1.0 { Step::Done } else { Step::Continue }
     }
 
     fn run_warm(pawn: &mut Pawn, ctx: &mut Ctx, at: TilePos, stage: u8) -> Step {
@@ -1533,11 +1229,7 @@ impl Colony {
                 Err(()) => Step::Fail("no path"),
             };
         }
-        if pawn.needs.warmth >= 0.9 {
-            Step::Done
-        } else {
-            Step::Continue
-        }
+        if pawn.needs.warmth >= 0.9 { Step::Done } else { Step::Continue }
     }
 
     // ------------------------------------------------------------ needs
@@ -1545,35 +1237,16 @@ impl Colony {
     /// Hunger, rest and warmth for creatures with `needs` data: they drop over
     /// time, and when one gets low the colonist drops its work to eat, sleep or
     /// warm up. Run before `tick`.
-    pub fn tick_needs(
-        &mut self,
-        world: &mut World,
-        content: &Content,
-        rng: &mut Rng,
-        env: &NeedsEnv,
-    ) -> Vec<ColonyEvent> {
+    pub fn tick_needs(&mut self, world: &mut World, content: &Content, rng: &mut Rng, env: &NeedsEnv) -> Vec<ColonyEvent> {
         let mut events = Vec::new();
         let mut dead = Vec::new();
         for i in 0..self.pawns.len() {
-            let Some(def) = content
-                .creatures
-                .by_idx(self.pawns[i].creature)
-                .needs
-                .clone()
-            else {
-                continue;
-            };
+            let Some(def) = content.creatures.by_idx(self.pawns[i].creature).needs.clone() else { continue };
             if (env.tick + self.pawns[i].id as u64) % NEEDS_EVERY != 0 {
                 continue;
             }
             let mut pawn = std::mem::take(&mut self.pawns[i]);
-            let mut ctx = Ctx {
-                world,
-                content,
-                rng,
-                events: &mut events,
-                walk: 1.0,
-            };
+            let mut ctx = Ctx { world, content, rng, events: &mut events, walk: 1.0 };
             if let Some(cause) = self.update_needs(&mut pawn, &mut ctx, &def, env) {
                 dead.push((pawn.id, cause));
             }
@@ -1581,34 +1254,17 @@ impl Colony {
         }
         for (id, cause) in dead {
             if let Some(p) = self.remove_pawn(world, content, rng, id) {
-                events.push(ColonyEvent::Died {
-                    name: p.name.clone(),
-                    cause,
-                    at: p.tile(),
-                });
+                events.push(ColonyEvent::Died { name: p.name.clone(), cause, at: p.tile() });
             }
         }
         events
     }
 
-    fn update_needs(
-        &mut self,
-        pawn: &mut Pawn,
-        ctx: &mut Ctx,
-        def: &NeedsDef,
-        env: &NeedsEnv,
-    ) -> Option<&'static str> {
+    fn update_needs(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, def: &NeedsDef, env: &NeedsEnv) -> Option<&'static str> {
         let dt = NEEDS_EVERY as f32 / env.day_ticks.max(1) as f32; // in days
         let here = pawn.tile();
         let asleep = pawn.sleeping();
-        let in_bed = asleep
-            && matches!(
-                &pawn.job,
-                Some(Job {
-                    kind: JobKind::Sleep { bed: Some(_), .. },
-                    ..
-                })
-            );
+        let in_bed = asleep && matches!(&pawn.job, Some(Job { kind: JobKind::Sleep { bed: Some(_), .. }, .. }));
         let burning = on_hot(ctx.world, ctx.content, pawn.pos);
         let n = &mut pawn.needs;
         n.felt = felt_temp(ctx.world, ctx.content, here, env);
@@ -1657,35 +1313,16 @@ impl Colony {
         }
         if burning {
             // Get off the fire first.
-            if let Some(t) = nearest_tile(here, 6, |t| {
-                ctx.world.walkable(t) && !on_hot(ctx.world, ctx.content, t.center())
-            }) {
+            if let Some(t) = nearest_tile(here, 6, |t| ctx.world.walkable(t) && !on_hot(ctx.world, ctx.content, t.center())) {
                 self.end_job(pawn, ctx, false);
-                pawn.job = Some(Job {
-                    kind: JobKind::Wander { dest: t },
-                    stage: 0,
-                    timer: 0.0,
-                    label: "Fleeing the fire".into(),
-                });
+                pawn.job = Some(Job { kind: JobKind::Wander { dest: t }, stage: 0, timer: 0.0, label: "Fleeing the fire".into() });
             }
             return None;
         }
         let n = pawn.needs.clone();
         let night = env.dark > 0.62;
-        let eating = matches!(
-            &pawn.job,
-            Some(Job {
-                kind: JobKind::Eat { .. },
-                ..
-            })
-        );
-        let warming = matches!(
-            &pawn.job,
-            Some(Job {
-                kind: JobKind::Warm { .. },
-                ..
-            })
-        );
+        let eating = matches!(&pawn.job, Some(Job { kind: JobKind::Eat { .. }, .. }));
+        let warming = matches!(&pawn.job, Some(Job { kind: JobKind::Warm { .. }, .. }));
         // Hungry: eat (even wake up for it when starving).
         if n.food < 0.3 && !eating && (!asleep || n.food < 0.08) {
             if let Some(job) = self.find_food(pawn, ctx) {
@@ -1693,15 +1330,7 @@ impl Colony {
                 pawn.job = Some(job);
                 return None;
             } else {
-                self.warn(
-                    ctx,
-                    env,
-                    WARN_FOOD,
-                    format!(
-                        "{} is hungry, but there is no food to reach. Harvest berries or hunt.",
-                        pawn.name
-                    ),
-                );
+                self.warn(ctx, env, WARN_FOOD, format!("{} is hungry, but there is no food to reach. Harvest berries or hunt.", pawn.name));
             }
         }
         // Cold: find somewhere warmer (sleepers only wake when it gets bad).
@@ -1713,41 +1342,16 @@ impl Colony {
             }
             // Searching is costly: wait an in-game hour before looking again.
             pawn.needs.warm_retry = env.tick + env.day_ticks / 24;
-            self.warn(
-                ctx,
-                env,
-                WARN_COLD,
-                format!(
-                    "{} is cold with nowhere warm to go. Build a roof and a campfire.",
-                    pawn.name
-                ),
-            );
+            self.warn(ctx, env, WARN_COLD, format!("{} is cold with nowhere warm to go. Build a roof and a campfire.", pawn.name));
         }
         // Tired: sleep. At night anyone not well rested goes to bed.
-        let busy_need = pawn.job.as_ref().is_some_and(|j| {
-            matches!(
-                j.kind,
-                JobKind::Eat { .. } | JobKind::Sleep { .. } | JobKind::Warm { .. }
-            )
-        });
-        let idle = pawn
-            .job
-            .as_ref()
-            .is_none_or(|j| matches!(j.kind, JobKind::Wander { .. }));
-        let wants_sleep =
-            n.rest < 0.25 || (night && n.rest < 0.7) || (idle && night && n.rest < 0.95);
+        let busy_need = pawn.job.as_ref().is_some_and(|j| matches!(j.kind, JobKind::Eat { .. } | JobKind::Sleep { .. } | JobKind::Warm { .. }));
+        let idle = pawn.job.as_ref().is_none_or(|j| matches!(j.kind, JobKind::Wander { .. }));
+        let wants_sleep = n.rest < 0.25 || (night && n.rest < 0.7) || (idle && night && n.rest < 0.95);
         if wants_sleep && !busy_need {
             let job = if n.rest <= 0.0 {
                 // Collapses where it stands.
-                Some(Job {
-                    kind: JobKind::Sleep {
-                        bed: None,
-                        at: here,
-                    },
-                    stage: 0,
-                    timer: 0.0,
-                    label: "Collapsed from exhaustion".into(),
-                })
+                Some(Job { kind: JobKind::Sleep { bed: None, at: here }, stage: 0, timer: 0.0, label: "Collapsed from exhaustion".into() })
             } else {
                 self.find_bed(pawn, ctx, env)
             };
@@ -1776,20 +1380,12 @@ impl Colony {
             .filter(|s| s.reserved.is_none() && ctx.content.items.by_idx(s.item).nutrition > 0.0)
             .map(|s| (s.tile, s.id))
             .collect();
-        let hint = goals
-            .keys()
-            .min_by_key(|t| t.manhattan(pawn.tile()))
-            .copied()?;
+        let hint = goals.keys().min_by_key(|t| t.manhattan(pawn.tile())).copied()?;
         let id = Self::search(pawn, ctx, &goals, |_, _| true, hint)?;
         let s = self.items.stacks.get_mut(&id)?;
         s.reserved = Some(pawn.id);
         let name = ctx.content.items.by_idx(s.item).name.clone();
-        Some(Job {
-            kind: JobKind::Eat { stack: id },
-            stage: 0,
-            timer: 0.0,
-            label: format!("Eating {}", name.to_lowercase()),
-        })
+        Some(Job { kind: JobKind::Eat { stack: id }, stage: 0, timer: 0.0, label: format!("Eating {}", name.to_lowercase()) })
     }
 
     /// The nearest free bed, or else a sheltered spot on the ground.
@@ -1799,19 +1395,14 @@ impl Colony {
             .pawns
             .iter()
             .filter_map(|p| match &p.job {
-                Some(Job {
-                    kind: JobKind::Sleep { bed: Some(b), .. },
-                    ..
-                }) => Some(*b),
+                Some(Job { kind: JobKind::Sleep { bed: Some(b), .. }, .. }) => Some(*b),
                 _ => None,
             })
             .collect();
         let area = TileRect::from_corners(here.offset(-40, -40), here.offset(40, 40));
         let mut goals: HashMap<TilePos, ObjId> = HashMap::new();
         for o in ctx.world.objects_in_rect(area) {
-            let Some(inst) = ctx.world.objects.get(o) else {
-                continue;
-            };
+            let Some(inst) = ctx.world.objects.get(o) else { continue };
             let proto = &ctx.content.protos[inst.def];
             if !inst.built || !proto.has_tag("bed") || taken.contains(&o) {
                 continue;
@@ -1829,28 +1420,16 @@ impl Colony {
         if let Some(hint) = goals.keys().min_by_key(|t| t.manhattan(here)).copied() {
             if let Some(bed) = Self::search(pawn, ctx, &goals, |_, _| true, hint) {
                 let at = pawn.path.first().copied().unwrap_or(here);
-                return Some(Job {
-                    kind: JobKind::Sleep { bed: Some(bed), at },
-                    stage: 0,
-                    timer: 0.0,
-                    label: "Sleeping in a bed".into(),
-                });
+                return Some(Job { kind: JobKind::Sleep { bed: Some(bed), at }, stage: 0, timer: 0.0, label: "Sleeping in a bed".into() });
             }
         }
         // No bed: under a roof if one is close, else right here.
-        let roof = nearest_tile(here, 8, |t| {
-            ctx.world.walkable(t) && roofed(ctx.world, ctx.content, t)
-        });
+        let roof = nearest_tile(here, 8, |t| ctx.world.walkable(t) && roofed(ctx.world, ctx.content, t));
         let at = match roof {
             Some(t) if t == here || Self::path_to(pawn, ctx, move |p| p == t, t) => t,
             _ => here,
         };
-        Some(Job {
-            kind: JobKind::Sleep { bed: None, at },
-            stage: 0,
-            timer: 0.0,
-            label: "Sleeping on the ground".into(),
-        })
+        Some(Job { kind: JobKind::Sleep { bed: None, at }, stage: 0, timer: 0.0, label: "Sleeping on the ground".into() })
     }
 
     /// The closest reachable spot that feels warmer than `low`.
@@ -1911,15 +1490,8 @@ impl Colony {
             warmer.sort_by(|a, b| b.0.total_cmp(&a.0));
             good = warmer.into_iter().take(6).map(|w| w.1).collect();
         }
-        let at = good
-            .into_iter()
-            .find(|&t| t == here || Self::path_to(pawn, ctx, move |p| p == t, t))?;
-        Some(Job {
-            kind: JobKind::Warm { at },
-            stage: 0,
-            timer: 0.0,
-            label: "Warming up".into(),
-        })
+        let at = good.into_iter().find(|&t| t == here || Self::path_to(pawn, ctx, move |p| p == t, t))?;
+        Some(Job { kind: JobKind::Warm { at }, stage: 0, timer: 0.0, label: "Warming up".into() })
     }
 
     fn set_stage(&mut self, pawn: &mut Pawn, s: u8) {
@@ -1934,12 +1506,7 @@ impl Colony {
     }
 
     /// Walk the current path; repath with `goal` if it gets blocked.
-    fn follow(
-        pawn: &mut Pawn,
-        ctx: &mut Ctx,
-        goal: impl Fn(TilePos) -> bool + Copy,
-        hint: TilePos,
-    ) -> Result<bool, ()> {
+    fn follow(pawn: &mut Pawn, ctx: &mut Ctx, goal: impl Fn(TilePos) -> bool + Copy, hint: TilePos) -> Result<bool, ()> {
         match Self::walk(pawn, ctx) {
             Ok(done) => {
                 if done && !goal(pawn.tile()) {
@@ -1951,11 +1518,7 @@ impl Colony {
                 Ok(done)
             }
             Err(()) => {
-                if Self::path_to(pawn, ctx, goal, hint) {
-                    Ok(false)
-                } else {
-                    Err(())
-                }
+                if Self::path_to(pawn, ctx, goal, hint) { Ok(false) } else { Err(()) }
             }
         }
     }
@@ -1971,24 +1534,11 @@ impl Colony {
         }
     }
 
-    fn run_work(
-        &mut self,
-        pawn: &mut Pawn,
-        ctx: &mut Ctx,
-        at: TilePos,
-        driver: JobDriver,
-        stage: u8,
-    ) -> Step {
-        let Some(des) = self.designations.get(&at).cloned() else {
-            return Step::Fail("order cancelled");
-        };
+    fn run_work(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, at: TilePos, driver: JobDriver, stage: u8) -> Step {
+        let Some(des) = self.designations.get(&at).cloned() else { return Step::Fail("order cancelled") };
         let jd = ctx.content.jobs.by_idx(des.job);
         let blocks = match &des.target {
-            DesTarget::Object(o) => ctx
-                .world
-                .objects
-                .get(*o)
-                .is_some_and(|i| ctx.content.protos[i.def].blocks),
+            DesTarget::Object(o) => ctx.world.objects.get(*o).is_some_and(|i| ctx.content.protos[i.def].blocks),
             DesTarget::Tile => true,
             DesTarget::Plant(_) => false,
         };
@@ -2002,11 +1552,7 @@ impl Colony {
                 Err(()) => Step::Fail("no path"),
             };
         }
-        let drop_tile = if ctx.world.walkable(at) {
-            at
-        } else {
-            pawn.tile()
-        };
+        let drop_tile = if ctx.world.walkable(at) { at } else { pawn.tile() };
         let speed = jd.speed.max(0.05);
         match (driver, &des.target) {
             (JobDriver::Fell | JobDriver::Deconstruct, DesTarget::Object(o)) => {
@@ -2024,9 +1570,7 @@ impl Colony {
                 }
                 let cur = ctx.world.objects.get(o).cloned().unwrap_or(inst.clone());
                 let proto = &ctx.content.protos[cur.def];
-                if cur.removed as f32 >= cur.total as f32 * proto.break_fraction
-                    || objs::live_cells(ctx.world, o).is_empty()
-                {
+                if cur.removed as f32 >= cur.total as f32 * proto.break_fraction || objs::live_cells(ctx.world, o).is_empty() {
                     let c = objs::center(&cur);
                     objs::destroy(ctx.world, ctx.content, o);
                     if driver == JobDriver::Deconstruct {
@@ -2034,8 +1578,7 @@ impl Colony {
                             for &(item, n) in &b.cost {
                                 let back = n.div_ceil(2);
                                 if back > 0 {
-                                    self.items
-                                        .add(ctx.world, ctx.content, item, back, drop_tile);
+                                    self.items.add(ctx.world, ctx.content, item, back, drop_tile);
                                 }
                             }
                         }
@@ -2043,15 +1586,11 @@ impl Colony {
                         for &(item, lo, hi) in &proto.drops {
                             let n = ctx.rng.range_i32(lo as i32, hi as i32) as u32;
                             if n > 0 {
-                                self.items
-                                    .add(ctx.world, ctx.content, item, n, cur.origin_tile());
+                                self.items.add(ctx.world, ctx.content, item, n, cur.origin_tile());
                             }
                         }
                     }
-                    ctx.events.push(ColonyEvent::Destroyed {
-                        def: cur.def,
-                        center: c,
-                    });
+                    ctx.events.push(ColonyEvent::Destroyed { def: cur.def, center: c });
                     self.designations.remove(&at);
                     return Step::Done;
                 }
@@ -2070,20 +1609,12 @@ impl Colony {
                         Some((_, _, m)) => self.gather(pawn, ctx, m, drop_tile),
                         None => {
                             // Round up what is left over.
-                            let left: Vec<(usize, u32)> = pawn
-                                .gathered
-                                .iter()
-                                .filter(|(_, n)| **n > 0)
-                                .map(|(i, n)| (*i, *n))
-                                .collect();
+                            let left: Vec<(usize, u32)> = pawn.gathered.iter().filter(|(_, n)| **n > 0).map(|(i, n)| (*i, *n)).collect();
                             for (item, _) in left {
                                 self.items.add(ctx.world, ctx.content, item, 1, drop_tile);
                                 pawn.gathered.insert(item, 0);
                             }
-                            ctx.events.push(ColonyEvent::Harvested {
-                                def: inst.def,
-                                center: objs::center(&inst),
-                            });
+                            ctx.events.push(ColonyEvent::Harvested { def: inst.def, center: objs::center(&inst) });
                             self.designations.remove(&at);
                             return Step::Done;
                         }
@@ -2109,8 +1640,7 @@ impl Colony {
                         .collect();
                     for (cx, cy) in cells {
                         let mm = ctx.world.get(cx, cy, Layer::Solid);
-                        ctx.world
-                            .set(ctx.content, cx, cy, Layer::Solid, NONE_MAT, NO_OBJ);
+                        ctx.world.set(ctx.content, cx, cy, Layer::Solid, NONE_MAT, NO_OBJ);
                         self.gather(pawn, ctx, mm, pawn.tile());
                     }
                 }
@@ -2143,19 +1673,10 @@ impl Colony {
         }
     }
 
-    fn run_haul_stockpile(
-        &mut self,
-        pawn: &mut Pawn,
-        ctx: &mut Ctx,
-        stack: u32,
-        dest: TilePos,
-        stage: u8,
-    ) -> Step {
+    fn run_haul_stockpile(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, stack: u32, dest: TilePos, stage: u8) -> Step {
         match stage {
             0 => {
-                let Some(s) = self.items.get(stack) else {
-                    return Step::Fail("items gone");
-                };
+                let Some(s) = self.items.get(stack) else { return Step::Fail("items gone") };
                 let tile = s.tile;
                 match Self::follow(pawn, ctx, move |t| t == tile, tile) {
                     Ok(true) => {
@@ -2196,19 +1717,9 @@ impl Colony {
         }
     }
 
-    fn run_supply(
-        &mut self,
-        pawn: &mut Pawn,
-        ctx: &mut Ctx,
-        stack: u32,
-        item: usize,
-        drops: &[(u32, u32)],
-        stage: u8,
-    ) -> Step {
+    fn run_supply(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, stack: u32, item: usize, drops: &[(u32, u32)], stage: u8) -> Step {
         if stage == 0 {
-            let Some(s) = self.items.get(stack) else {
-                return Step::Fail("items gone");
-            };
+            let Some(s) = self.items.get(stack) else { return Step::Fail("items gone") };
             let tile = s.tile;
             return match Self::follow(pawn, ctx, move |t| t == tile, tile) {
                 Ok(true) => {
@@ -2229,11 +1740,7 @@ impl Colony {
                         }
                         keep.push((bp, give));
                     }
-                    if let Some(Job {
-                        kind: JobKind::Supply { drops, .. },
-                        ..
-                    }) = &mut pawn.job
-                    {
+                    if let Some(Job { kind: JobKind::Supply { drops, .. }, .. }) = &mut pawn.job {
                         *drops = keep;
                     }
                     pawn.carrying = Some((item, got));
@@ -2246,9 +1753,7 @@ impl Colony {
             };
         }
         let i = stage as usize - 1;
-        let Some(&(bp, n)) = drops.get(i) else {
-            return Step::Done;
-        };
+        let Some(&(bp, n)) = drops.get(i) else { return Step::Done };
         let last = i + 1 >= drops.len();
         let next = |this: &mut Self, pawn: &mut Pawn| {
             pawn.path.clear();
@@ -2258,9 +1763,7 @@ impl Colony {
         if n == 0 {
             return next(self, pawn);
         }
-        let Some(b) = self.blueprints.get(&bp) else {
-            return next(self, pawn);
-        };
+        let Some(b) = self.blueprints.get(&bp) else { return next(self, pawn) };
         let (bt, blocks) = (b.tile, ctx.content.protos[b.def].blocks);
         match Self::follow(pawn, ctx, near(bt, blocks), bt) {
             Ok(true) => {
@@ -2271,11 +1774,7 @@ impl Colony {
                     b.delivered[ci] += give;
                     b.incoming[ci] = b.incoming[ci].saturating_sub(n);
                 }
-                pawn.carrying = if have > give {
-                    Some((item, have - give))
-                } else {
-                    None
-                };
+                pawn.carrying = if have > give { Some((item, have - give)) } else { None };
                 next(self, pawn)
             }
             Ok(false) => Step::Continue,
@@ -2288,9 +1787,7 @@ impl Colony {
     }
 
     fn run_construct(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, bp: u32, stage: u8) -> Step {
-        let Some(b) = self.blueprints.get(&bp) else {
-            return Step::Fail("blueprint gone");
-        };
+        let Some(b) = self.blueprints.get(&bp) else { return Step::Fail("blueprint gone") };
         let (bt, def) = (b.tile, b.def);
         let proto = &ctx.content.protos[def];
         if stage == 0 {
@@ -2308,14 +1805,7 @@ impl Colony {
         let mut cells = proto.cells(b.seed);
         cells.sort_by_key(|c| (c.layer, c.dy, c.dx));
         if b.obj.is_none() {
-            b.obj = Some(objs::create_instance(
-                ctx.world,
-                ctx.content,
-                def,
-                b.origin,
-                b.seed,
-                true,
-            ));
+            b.obj = Some(objs::create_instance(ctx.world, ctx.content, def, b.origin, b.seed, true));
         }
         let id = b.obj.unwrap();
         b.progress += 1;
@@ -2327,12 +1817,7 @@ impl Colony {
             b.placed += 1;
         }
         if b.progress >= work {
-            let center = ctx
-                .world
-                .objects
-                .get(id)
-                .map(objs::center)
-                .unwrap_or(b.origin);
+            let center = ctx.world.objects.get(id).map(objs::center).unwrap_or(b.origin);
             self.blueprints.remove(&bp);
             ctx.events.push(ColonyEvent::Built { def, center, id });
             return Step::Done;
@@ -2343,17 +1828,10 @@ impl Colony {
 
 fn mine_ok(world: &World, content: &Content, x: i32, y: i32, targets: &[String]) -> bool {
     let m = world.get(x, y, Layer::Solid);
-    m != NONE_MAT
-        && world.get_obj(x, y, Layer::Solid) == NO_OBJ
-        && tags_match(targets, &content.mat_rt(m).tags)
+    m != NONE_MAT && world.get_obj(x, y, Layer::Solid) == NO_OBJ && tags_match(targets, &content.mat_rt(m).tags)
 }
 
 /// A minable particle in this tile, if any.
-pub fn mineable_cell(
-    world: &World,
-    content: &Content,
-    t: TilePos,
-    targets: &[String],
-) -> Option<(i32, i32)> {
+pub fn mineable_cell(world: &World, content: &Content, t: TilePos, targets: &[String]) -> Option<(i32, i32)> {
     World::tile_cells(t).find(|&(x, y)| mine_ok(world, content, x, y, targets))
 }

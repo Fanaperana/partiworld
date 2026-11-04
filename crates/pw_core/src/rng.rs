@@ -38,9 +38,7 @@ pub struct Rng {
 
 impl Rng {
     pub fn new(seed: u64) -> Self {
-        Self {
-            state: splitmix64(seed),
-        }
+        Self { state: splitmix64(seed) }
     }
     pub fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -61,11 +59,7 @@ impl Rng {
         lo + (self.next_u64() % ((hi - lo + 1) as u64)) as i32
     }
     pub fn below(&mut self, n: usize) -> usize {
-        if n == 0 {
-            0
-        } else {
-            (self.next_u64() % n as u64) as usize
-        }
+        if n == 0 { 0 } else { (self.next_u64() % n as u64) as usize }
     }
     pub fn chance(&mut self, p: f32) -> bool {
         self.f32() < p

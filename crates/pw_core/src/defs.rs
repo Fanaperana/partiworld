@@ -29,9 +29,7 @@ fn yes() -> bool {
 }
 
 /// The three particle layers of a cell.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum Layer {
     /// Ground: grass, dirt, sand, water, wooden floor.
     Floor,
@@ -554,11 +552,7 @@ fn default_max_pop() -> u32 {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum FoodDef {
     /// Eat floor particles (`matches`: id, `tag:x`) and leave `leaves` behind.
-    Graze {
-        matches: String,
-        leaves: String,
-        energy: f32,
-    },
+    Graze { matches: String, leaves: String, energy: f32 },
     /// Eat from objects with these tags: their yield (berries) first, then leaves.
     Browse { tags: Vec<String>, energy: f32 },
     /// Hunt creatures with these tags; gains this share of the prey's energy.
@@ -700,16 +694,7 @@ impl Default for WorldGenDef {
 macro_rules! impl_def {
     ($($t:ty),*) => { $(impl Def for $t { fn def_id(&self) -> &str { &self.id } })* };
 }
-impl_def!(
-    MaterialDef,
-    ItemDef,
-    ObjectDef,
-    BiomeDef,
-    ReactionDef,
-    JobDef,
-    CreatureDef,
-    PowerDef
-);
+impl_def!(MaterialDef, ItemDef, ObjectDef, BiomeDef, ReactionDef, JobDef, CreatureDef, PowerDef);
 
 /// A god power: a brush the player paints onto the world, made of effects.
 /// Mods add powers by adding files to `powers/`.
@@ -857,12 +842,7 @@ pub struct TribeJobs {
 
 impl Default for TribeJobs {
     fn default() -> Self {
-        Self {
-            harvest: job_harvest(),
-            chop: job_chop(),
-            quarry: job_quarry(),
-            plant: job_plant(),
-        }
+        Self { harvest: job_harvest(), chop: job_chop(), quarry: job_quarry(), plant: job_plant() }
     }
 }
 

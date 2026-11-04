@@ -31,23 +31,9 @@ pub const F_STONE: usize = 2;
 pub const F_BUILD: usize = 3;
 pub const F_HUNT: usize = 4;
 pub const F_FARM: usize = 5;
-pub const FOCUS_NAMES: [&str; FOCI] = [
-    "Gathering food",
-    "Cutting wood",
-    "Breaking stone",
-    "Building",
-    "Hunting",
-    "Farming",
-];
+pub const FOCUS_NAMES: [&str; FOCI] = ["Gathering food", "Cutting wood", "Breaking stone", "Building", "Hunting", "Farming"];
 /// What a culture that values a focus is said to value.
-pub const VALUE_NAMES: [&str; FOCI] = [
-    "foraging",
-    "woodcraft",
-    "stonework",
-    "building",
-    "the hunt",
-    "farming",
-];
+pub const VALUE_NAMES: [&str; FOCI] = ["foraging", "woodcraft", "stonework", "building", "the hunt", "farming"];
 
 pub const TRAITS: usize = 4;
 pub const T_FERTILITY: usize = 0;
@@ -68,9 +54,7 @@ const NIGHT: f32 = 0.62;
 const HUNTING: &str = "Hunting";
 const HOMEWARD: &str = "Heading home";
 
-const DEFAULT_SYLLABLES: [&str; 14] = [
-    "ka", "ro", "mi", "ta", "lu", "ne", "so", "ar", "en", "ki", "va", "do", "ul", "she",
-];
+const DEFAULT_SYLLABLES: [&str; 14] = ["ka", "ro", "mi", "ta", "lu", "ne", "so", "ar", "en", "ki", "va", "do", "ul", "she"];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Member {
@@ -159,34 +143,17 @@ pub enum Founders {
     /// Brand new people.
     New(u32),
     /// A band that left another tribe.
-    Band {
-        parent: u32,
-        pawns: Vec<Pawn>,
-        members: Vec<Member>,
-        food: Vec<(usize, u32)>,
-    },
+    Band { parent: u32, pawns: Vec<Pawn>, members: Vec<Member>, food: Vec<(usize, u32)> },
 }
 
 #[derive(Debug)]
 pub enum TribeEvent {
     Message(String),
-    Founded {
-        name: String,
-    },
-    Discovered {
-        tribe: String,
-        tech: String,
-    },
-    Lost {
-        name: String,
-    },
+    Founded { name: String },
+    Discovered { tribe: String, tech: String },
+    Lost { name: String },
     /// A band wants to leave and settle elsewhere; the game finds the land.
-    Split {
-        from: u32,
-        pawns: Vec<Pawn>,
-        members: Vec<Member>,
-        food: Vec<(usize, u32)>,
-    },
+    Split { from: u32, pawns: Vec<Pawn>, members: Vec<Member>, food: Vec<(usize, u32)> },
     Colony(ColonyEvent),
 }
 
@@ -279,14 +246,7 @@ fn plan_cells(plan: &PlanDef, origin: TilePos) -> Vec<(TilePos, &Vec<String>)> {
 }
 
 fn plan_size(plan: &PlanDef) -> (i32, i32) {
-    (
-        plan.rows
-            .iter()
-            .map(|r| r.chars().count())
-            .max()
-            .unwrap_or(1) as i32,
-        plan.rows.len().max(1) as i32,
-    )
+    (plan.rows.iter().map(|r| r.chars().count()).max().unwrap_or(1) as i32, plan.rows.len().max(1) as i32)
 }
 
 fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
@@ -316,9 +276,7 @@ impl Tribes {
 
     /// Which tribe owns the land at a tile, if any.
     pub fn land_at(&self, t: TilePos) -> Option<&Tribe> {
-        self.living()
-            .filter(|tr| tr.center.chebyshev(t) <= tr.radius)
-            .min_by_key(|tr| tr.center.chebyshev(t))
+        self.living().filter(|tr| tr.center.chebyshev(t) <= tr.radius).min_by_key(|tr| tr.center.chebyshev(t))
     }
 
     /// Start a tribe at `site`. Returns its id.
@@ -353,13 +311,7 @@ impl Tribes {
                 for v in &mut t {
                     *v = (*v + gauss(rng) * 0.1).clamp(0.3, 3.0);
                 }
-                (
-                    c,
-                    t,
-                    p.techs.clone(),
-                    p.hue + gauss(rng) * 0.08,
-                    p.generation + 1,
-                )
+                (c, t, p.techs.clone(), p.hue + gauss(rng) * 0.08, p.generation + 1)
             }
             None => {
                 let mut c = [1.0; FOCI];
@@ -416,83 +368,42 @@ impl Tribes {
                 objs::place(world, content, totem, site.origin(), seed, true);
             }
         }
-        tribe.colony.set_stockpile(
-            world,
-            TileRect::from_corners(site.offset(2, -1), site.offset(4, 1)),
-            true,
-        );
+        tribe.colony.set_stockpile(world, TileRect::from_corners(site.offset(2, -1), site.offset(4, 1)), true);
         let day = tick / day_ticks.max(1) + 1;
         match founders {
             Founders::New(n) => {
-                let n = if n == 0 {
-                    rng.range_i32(def.members.0 as i32, def.members.1 as i32) as u32
-                } else {
-                    n
-                };
+                let n = if n == 0 { rng.range_i32(def.members.0 as i32, def.members.1 as i32) as u32 } else { n };
                 for i in 0..n {
-                    let at =
-                        nearest_tile(site.offset(i as i32 % 3 - 1, -1 - i as i32 / 3), 5, |t| {
-                            world.walkable(t)
-                        })
-                        .unwrap_or(site);
+                    let at = nearest_tile(site.offset(i as i32 % 3 - 1, -1 - i as i32 / 3), 5, |t| world.walkable(t)).unwrap_or(site);
                     let pawn = tribe.colony.spawn_pawn(content, creature, at, rng);
-                    let span = rng.range_f32(
-                        def.lifespan_days.0,
-                        def.lifespan_days.1.max(def.lifespan_days.0),
-                    ) * day_ticks as f32;
+                    let span = rng.range_f32(def.lifespan_days.0, def.lifespan_days.1.max(def.lifespan_days.0)) * day_ticks as f32;
                     let age = (span * rng.range_f32(0.2, 0.45)) as u64;
                     tribe.dress(pawn, def, rng);
-                    tribe.members.push(Member {
-                        pawn,
-                        age,
-                        lifespan: span as u64,
-                        hunger: 0,
-                        hurt: 0,
-                    });
+                    tribe.members.push(Member { pawn, age, lifespan: span as u64, hunger: 0, hurt: 0 });
                 }
                 for (item, n) in &def.start_items {
                     if let Some(i) = content.items.idx(item) {
-                        tribe
-                            .colony
-                            .items
-                            .add(world, content, i, *n, site.offset(3, 0));
+                        tribe.colony.items.add(world, content, i, *n, site.offset(3, 0));
                     }
                 }
-                tribe
-                    .chronicle
-                    .push(format!("Day {day}: the {name} settled here."));
+                tribe.chronicle.push(format!("Day {day}: the {name} settled here."));
             }
-            Founders::Band {
-                pawns,
-                members,
-                food,
-                ..
-            } => {
+            Founders::Band { pawns, members, food, .. } => {
                 let from = parent.as_ref().map(|p| p.name.clone()).unwrap_or_default();
                 for (pawn, mut m) in pawns.into_iter().zip(members) {
                     let pid = tribe.colony.adopt_pawn(pawn);
                     tribe.dress(pid, def, rng);
                     // They walk to their new home.
                     if let Some(p) = tribe.colony.pawns.iter_mut().find(|p| p.id == pid) {
-                        p.job = Some(Job {
-                            kind: JobKind::Wander { dest: site },
-                            stage: 0,
-                            timer: 0.0,
-                            label: HOMEWARD.into(),
-                        });
+                        p.job = Some(Job { kind: JobKind::Wander { dest: site }, stage: 0, timer: 0.0, label: HOMEWARD.into() });
                     }
                     m.pawn = pid;
                     tribe.members.push(m);
                 }
                 for (item, n) in food {
-                    tribe
-                        .colony
-                        .items
-                        .add(world, content, item, n, site.offset(3, 0));
+                    tribe.colony.items.add(world, content, item, n, site.offset(3, 0));
                 }
-                tribe.chronicle.push(format!(
-                    "Day {day}: a band left the {from} and founded the {name} here."
-                ));
+                tribe.chronicle.push(format!("Day {day}: a band left the {from} and founded the {name} here."));
             }
         }
         if tribe.members.is_empty() {
@@ -503,37 +414,18 @@ impl Tribes {
     }
 
     /// Put a band back into its tribe (no land was found for it).
-    pub fn rejoin(
-        &mut self,
-        parent: u32,
-        pawns: Vec<Pawn>,
-        members: Vec<Member>,
-        food: Vec<(usize, u32)>,
-        world: &World,
-        content: &Content,
-    ) {
-        let Some(t) = self.list.iter_mut().find(|t| t.id == parent) else {
-            return;
-        };
+    pub fn rejoin(&mut self, parent: u32, pawns: Vec<Pawn>, members: Vec<Member>, food: Vec<(usize, u32)>, world: &World, content: &Content) {
+        let Some(t) = self.list.iter_mut().find(|t| t.id == parent) else { return };
         for (pawn, mut m) in pawns.into_iter().zip(members) {
             m.pawn = t.colony.adopt_pawn(pawn);
             t.members.push(m);
         }
         for (item, n) in food {
-            t.colony
-                .items
-                .add(world, content, item, n, t.center.offset(3, 0));
+            t.colony.items.add(world, content, item, n, t.center.offset(3, 0));
         }
     }
 
-    pub fn tick(
-        &mut self,
-        world: &mut World,
-        content: &Content,
-        rng: &mut Rng,
-        env: &TribeEnv,
-        life: &mut Life,
-    ) -> Vec<TribeEvent> {
+    pub fn tick(&mut self, world: &mut World, content: &Content, rng: &mut Rng, env: &TribeEnv, life: &mut Life) -> Vec<TribeEvent> {
         let mut events = Vec::new();
         let mut room = self.alive() < MAX_TRIBES;
         let centers: Vec<(u32, TilePos)> = self.living().map(|t| (t.id, t.center)).collect();
@@ -541,11 +433,7 @@ impl Tribes {
             if t.gone.is_some() {
                 continue;
             }
-            let others: Vec<TilePos> = centers
-                .iter()
-                .filter(|c| c.0 != t.id)
-                .map(|c| c.1)
-                .collect();
+            let others: Vec<TilePos> = centers.iter().filter(|c| c.0 != t.id).map(|c| c.1).collect();
             if t.tick(world, content, rng, env, life, &others, room, &mut events) {
                 room = false; // one band at a time
             }
@@ -582,42 +470,26 @@ impl Tribe {
 
     /// What its people can do: union of what its techs unlock.
     pub fn can(&self, def: &TribeDef, ability: &str) -> bool {
-        def.techs
-            .iter()
-            .any(|t| self.techs.contains(&t.id) && t.unlocks.iter().any(|u| u == ability))
+        def.techs.iter().any(|t| self.techs.contains(&t.id) && t.unlocks.iter().any(|u| u == ability))
     }
 
     fn food_items(def: &TribeDef, content: &Content) -> Vec<(usize, f32)> {
-        def.food
-            .iter()
-            .filter_map(|(id, v)| content.items.idx(id).map(|i| (i, *v)))
-            .collect()
+        def.food.iter().filter_map(|(id, v)| content.items.idx(id).map(|i| (i, *v))).collect()
     }
 
     /// Meals in store.
     pub fn food(&self, def: &TribeDef, content: &Content) -> f32 {
-        Self::food_items(def, content)
-            .iter()
-            .map(|&(i, v)| self.colony.items.total(i) as f32 * v)
-            .sum()
+        Self::food_items(def, content).iter().map(|&(i, v)| self.colony.items.total(i) as f32 * v).sum()
     }
 
     /// Days the store would last.
     pub fn food_days(&self, def: &TribeDef, content: &Content) -> f32 {
         let need = self.members.len() as f32 * def.meals_per_day.max(0.01);
-        if need <= 0.0 {
-            99.0
-        } else {
-            self.food(def, content) / need
-        }
+        if need <= 0.0 { 99.0 } else { self.food(def, content) / need }
     }
 
     pub fn item_total(&self, content: &Content, id: &str) -> u32 {
-        content
-            .items
-            .idx(id)
-            .map(|i| self.colony.items.total(i))
-            .unwrap_or(0)
+        content.items.idx(id).map(|i| self.colony.items.total(i)).unwrap_or(0)
     }
 
     /// How many people the village has room for.
@@ -638,9 +510,7 @@ impl Tribe {
         room: bool,
         events: &mut Vec<TribeEvent>,
     ) -> bool {
-        let Some(def) = content.tribes.get(&self.def_id) else {
-            return false;
-        };
+        let Some(def) = content.tribes.get(&self.def_id) else { return false };
         let day = env.tick / env.day_ticks.max(1) + 1;
         let night = env.dark > NIGHT;
         self.send_home(world, rng, night);
@@ -662,15 +532,14 @@ impl Tribe {
         if env.tick.is_multiple_of(10) {
             for p in &self.colony.pawns {
                 let (x, y) = (p.pos.0 as i32, p.pos.1 as i32);
-                let hot = [Layer::Floor, Layer::Solid, Layer::Overlay]
-                    .iter()
-                    .any(|&l| content.mat_rt(world.get(x, y, l)).has_tag("hot"));
-                if hot && let Some(m) = self.members.iter_mut().find(|m| m.pawn == p.id) {
-                    m.hurt += 1;
-                    if m.hurt >= 5 {
-                        deaths.push((p.id, "burned to death"));
+                let hot = [Layer::Floor, Layer::Solid, Layer::Overlay].iter().any(|&l| content.mat_rt(world.get(x, y, l)).has_tag("hot"));
+                if hot
+                    && let Some(m) = self.members.iter_mut().find(|m| m.pawn == p.id) {
+                        m.hurt += 1;
+                        if m.hurt >= 5 {
+                            deaths.push((p.id, "burned to death"));
+                        }
                     }
-                }
             }
         }
         if env.tick >= self.think_at {
@@ -697,29 +566,16 @@ impl Tribe {
         if self.members.is_empty() && self.gone.is_none() {
             self.gone = Some(env.tick);
             self.note(day, "the last of them is gone.");
-            let r = TileRect::from_corners(
-                self.center.offset(-self.radius, -self.radius),
-                self.center.offset(self.radius, self.radius),
-            );
+            let r = TileRect::from_corners(self.center.offset(-self.radius, -self.radius), self.center.offset(self.radius, self.radius));
             self.colony.cancel(world, content, r);
             self.colony.designations.clear();
             self.hunts.clear();
-            events.push(TribeEvent::Lost {
-                name: self.name.clone(),
-            });
+            events.push(TribeEvent::Lost { name: self.name.clone() });
         }
         split
     }
 
-    fn lose(
-        &mut self,
-        world: &mut World,
-        content: &Content,
-        rng: &mut Rng,
-        pawn: u32,
-        how: &str,
-        day: u64,
-    ) {
+    fn lose(&mut self, world: &mut World, content: &Content, rng: &mut Rng, pawn: u32, how: &str, day: u64) {
         if let Some(p) = self.colony.remove_pawn(world, content, rng, pawn) {
             self.note(day, format!("{} {how}.", p.name));
         }
@@ -738,65 +594,33 @@ impl Tribe {
             }
             let here = p.tile();
             if night {
-                let home = if self.homes.is_empty() {
-                    center.offset(i as i32 % 3 - 1, 1 + i as i32 / 3 % 2)
-                } else {
-                    self.homes[i % self.homes.len()]
-                };
+                let home = if self.homes.is_empty() { center.offset(i as i32 % 3 - 1, 1 + i as i32 / 3 % 2) } else { self.homes[i % self.homes.len()] };
                 if here.chebyshev(home) <= 1 || p.think > 0 {
                     p.think = p.think.max(20);
                 } else if world.walkable(home) {
-                    p.job = Some(Job {
-                        kind: JobKind::Wander { dest: home },
-                        stage: 0,
-                        timer: 0.0,
-                        label: HOMEWARD.into(),
-                    });
+                    p.job = Some(Job { kind: JobKind::Wander { dest: home }, stage: 0, timer: 0.0, label: HOMEWARD.into() });
                     p.think = 0;
                 } else {
                     p.think = 40 + rng.below(20) as u32;
                 }
             } else if here.chebyshev(center) > far && p.think == 0 {
-                p.job = Some(Job {
-                    kind: JobKind::Wander {
-                        dest: center.offset(0, -2),
-                    },
-                    stage: 0,
-                    timer: 0.0,
-                    label: HOMEWARD.into(),
-                });
+                p.job = Some(Job { kind: JobKind::Wander { dest: center.offset(0, -2) }, stage: 0, timer: 0.0, label: HOMEWARD.into() });
             }
         }
     }
 
     /// Hunters chase their prey and try to bring it down.
-    fn hunt(
-        &mut self,
-        _world: &mut World,
-        content: &Content,
-        rng: &mut Rng,
-        env: &TribeEnv,
-        life: &mut Life,
-        day: u64,
-    ) {
+    fn hunt(&mut self, _world: &mut World, content: &Content, rng: &mut Rng, env: &TribeEnv, life: &mut Life, day: u64) {
         let mut hunts = std::mem::take(&mut self.hunts);
         let bold = self.traits[T_BOLD];
         let mut caught: Vec<(String, TilePos, usize)> = Vec::new();
         hunts.retain(|h| {
-            let Some(pawn) = self.colony.pawns.iter_mut().find(|p| p.id == h.pawn) else {
-                return false;
-            };
-            let hunting = pawn
-                .job
-                .as_ref()
-                .is_some_and(|j| j.label.starts_with(HUNTING));
+            let Some(pawn) = self.colony.pawns.iter_mut().find(|p| p.id == h.pawn) else { return false };
+            let hunting = pawn.job.as_ref().is_some_and(|j| j.label.starts_with(HUNTING));
             if pawn.job.is_some() && !hunting {
                 return false; // busy with something else now
             }
-            let prey = life
-                .get(h.prey)
-                .filter(|c| c.dead.is_none())
-                .map(|c| (c.pos, c.tile(), c.def));
+            let prey = life.get(h.prey).filter(|c| c.dead.is_none()).map(|c| (c.pos, c.tile(), c.def));
             let Some((ppos, ptile, pdef)) = prey.filter(|_| env.tick <= h.until) else {
                 if hunting {
                     pawn.job = None;
@@ -815,20 +639,12 @@ impl Tribe {
                 return true;
             }
             let retarget = match &pawn.job {
-                Some(Job {
-                    kind: JobKind::Wander { dest },
-                    ..
-                }) => dest.chebyshev(ptile) > 1,
+                Some(Job { kind: JobKind::Wander { dest }, .. }) => dest.chebyshev(ptile) > 1,
                 _ => true,
             };
             if retarget {
                 let name = content.creatures.by_idx(pdef).name.to_lowercase();
-                pawn.job = Some(Job {
-                    kind: JobKind::Wander { dest: ptile },
-                    stage: 0,
-                    timer: 0.0,
-                    label: format!("{HUNTING} {name}"),
-                });
+                pawn.job = Some(Job { kind: JobKind::Wander { dest: ptile }, stage: 0, timer: 0.0, label: format!("{HUNTING} {name}") });
                 pawn.path.clear();
             }
             true
@@ -846,13 +662,7 @@ impl Tribe {
             self.hunted += 1;
             self.effort[F_HUNT] += 1.0;
             if self.hunted == 1 {
-                self.note(
-                    day,
-                    format!(
-                        "{who} brought down the tribe's first {}.",
-                        d.name.to_lowercase()
-                    ),
-                );
+                self.note(day, format!("{who} brought down the tribe's first {}.", d.name.to_lowercase()));
             }
         }
     }
@@ -860,16 +670,7 @@ impl Tribe {
     // ------------------------------------------------------------ the chief
 
     #[allow(clippy::too_many_arguments)]
-    fn think(
-        &mut self,
-        def: &TribeDef,
-        world: &mut World,
-        content: &Content,
-        rng: &mut Rng,
-        env: &TribeEnv,
-        life: &Life,
-        others: &[TilePos],
-    ) {
+    fn think(&mut self, def: &TribeDef, world: &mut World, content: &Content, rng: &mut Rng, env: &TribeEnv, life: &Life, others: &[TilePos]) {
         let day = env.tick / env.day_ticks.max(1) + 1;
         self.refresh_homes(def, world, content);
         self.advance_projects(def, world, content, rng, env, day);
@@ -894,29 +695,13 @@ impl Tribe {
         let wood = wood_i.map(|i| self.colony.items.total(i)).unwrap_or(0) as f32;
         let stone = stone_i.map(|i| self.colony.items.total(i)).unwrap_or(0) as f32;
         let building = self.projects.iter().any(|p| !p.done);
-        let has_fire = self.projects.iter().any(|p| {
-            def.plans
-                .iter()
-                .any(|pl| pl.id == p.plan && pl.role == "fire")
-        });
+        let has_fire = self.projects.iter().any(|p| def.plans.iter().any(|pl| pl.id == p.plan && pl.role == "fire"));
         let people = self.members.len() as u32;
 
         let mut need = [0.0f32; FOCI];
-        need[F_FOOD] = if self.can(def, "harvest") && food_days < FOOD_GOAL * 2.0 {
-            food_need.max(0.12)
-        } else {
-            0.0
-        };
-        need[F_WOOD] = if self.can(def, "chop") {
-            (1.0 - wood / (25.0 + bp_wood as f32)).clamp(0.05, 1.0)
-        } else {
-            0.0
-        };
-        need[F_STONE] = if self.can(def, "quarry") {
-            (1.0 - stone / (15.0 + bp_stone as f32)).clamp(0.0, 1.0) * 0.8
-        } else {
-            0.0
-        };
+        need[F_FOOD] = if self.can(def, "harvest") && food_days < FOOD_GOAL * 2.0 { food_need.max(0.12) } else { 0.0 };
+        need[F_WOOD] = if self.can(def, "chop") { (1.0 - wood / (25.0 + bp_wood as f32)).clamp(0.05, 1.0) } else { 0.0 };
+        need[F_STONE] = if self.can(def, "quarry") { (1.0 - stone / (15.0 + bp_stone as f32)).clamp(0.0, 1.0) * 0.8 } else { 0.0 };
         need[F_BUILD] = if building {
             0.0
         } else if !has_fire {
@@ -929,19 +714,10 @@ impl Tribe {
             0.03
         };
         // Hunt when food runs short, not for sport.
-        need[F_HUNT] = if self.can(def, "hunt") && self.hunts.is_empty() {
-            food_need
-        } else {
-            0.0
-        };
-        need[F_FARM] = if self.can(def, "farm") && def.crop.is_some() {
-            food_need * 0.7 + 0.1
-        } else {
-            0.0
-        };
+        need[F_HUNT] = if self.can(def, "hunt") && self.hunts.is_empty() { food_need } else { 0.0 };
+        need[F_FARM] = if self.can(def, "farm") && def.crop.is_some() { food_need * 0.7 + 0.1 } else { 0.0 };
 
-        let mut order: Vec<(usize, f32)> =
-            (0..FOCI).map(|f| (f, need[f] * self.culture[f])).collect();
+        let mut order: Vec<(usize, f32)> = (0..FOCI).map(|f| (f, need[f] * self.culture[f])).collect();
         order.sort_by(|a, b| b.1.total_cmp(&a.1));
         self.focus = order[0].0 as u8;
         let cap = (people as usize * 2 + 2).max(4);
@@ -953,15 +729,9 @@ impl Tribe {
             let open = self.colony.designations.len();
             let room = cap.saturating_sub(open);
             let n = match f {
-                F_FOOD if room > 0 => {
-                    self.order_objects(world, content, &def.jobs.harvest, true, 2.min(room), env)
-                }
-                F_WOOD if room > 0 => {
-                    self.order_objects(world, content, &def.jobs.chop, false, 2.min(room), env)
-                }
-                F_STONE if room > 0 => {
-                    self.order_objects(world, content, &def.jobs.quarry, false, 1, env)
-                }
+                F_FOOD if room > 0 => self.order_objects(world, content, &def.jobs.harvest, true, 2.min(room), env),
+                F_WOOD if room > 0 => self.order_objects(world, content, &def.jobs.chop, false, 2.min(room), env),
+                F_STONE if room > 0 => self.order_objects(world, content, &def.jobs.quarry, false, 1, env),
                 F_FARM if room > 0 => self.order_planting(world, content, def, 2.min(room), env),
                 F_BUILD => self.start_project(def, world, content, rng, env, others) as usize * 3,
                 F_HUNT => self.start_hunt(def, content, life, env) as usize,
@@ -980,34 +750,17 @@ impl Tribe {
     }
 
     /// Order work on the nearest few objects a job targets. Returns how many.
-    fn order_objects(
-        &mut self,
-        world: &World,
-        content: &Content,
-        job: &str,
-        need_yield: bool,
-        k: usize,
-        env: &TribeEnv,
-    ) -> usize {
-        let Some(j) = content.jobs.idx(job) else {
-            return 0;
-        };
+    fn order_objects(&mut self, world: &World, content: &Content, job: &str, need_yield: bool, k: usize, env: &TribeEnv) -> usize {
+        let Some(j) = content.jobs.idx(job) else { return 0 };
         let targets = &content.jobs.by_idx(j).targets;
         let r = self.radius;
         let rect = TileRect::from_corners(self.center.offset(-r, -r), self.center.offset(r, r));
         let mut cands: Vec<(i32, TilePos)> = Vec::new();
         for o in world.objects_in_rect(rect) {
-            let Some(inst) = world.objects.get(o) else {
-                continue;
-            };
+            let Some(inst) = world.objects.get(o) else { continue };
             let p = &content.protos[inst.def];
             let t = inst.origin_tile();
-            if inst.built
-                || p.has_tag("plant")
-                || !tags_match(targets, &p.tags)
-                || self.colony.designations.contains_key(&t)
-                || !self.in_reach(t, env)
-            {
+            if inst.built || p.has_tag("plant") || !tags_match(targets, &p.tags) || self.colony.designations.contains_key(&t) || !self.in_reach(t, env) {
                 continue;
             }
             if need_yield && !objs::has_yield(world, content, o) {
@@ -1023,27 +776,13 @@ impl Tribe {
         cands.sort();
         let mut n = 0;
         for &(_, t) in cands.iter().take(k) {
-            n += self
-                .colony
-                .designate(world, content, j, TileRect::from_corners(t, t), None);
+            n += self.colony.designate(world, content, j, TileRect::from_corners(t, t), None);
         }
         n
     }
 
-    fn order_planting(
-        &mut self,
-        world: &World,
-        content: &Content,
-        def: &TribeDef,
-        k: usize,
-        env: &TribeEnv,
-    ) -> usize {
-        let (Some(j), Some(crop)) = (
-            content.jobs.idx(&def.jobs.plant),
-            def.crop.as_ref().and_then(|c| content.objects.idx(c)),
-        ) else {
-            return 0;
-        };
+    fn order_planting(&mut self, world: &World, content: &Content, def: &TribeDef, k: usize, env: &TribeEnv) -> usize {
+        let (Some(j), Some(crop)) = (content.jobs.idx(&def.jobs.plant), def.crop.as_ref().and_then(|c| content.objects.idx(c))) else { return 0 };
         let mut n = 0;
         // A field ring just outside the houses.
         for r in 5..self.radius.min(10) {
@@ -1052,74 +791,34 @@ impl Tribe {
                     return n;
                 }
                 let a = i as f32 / (r * 8) as f32 * std::f32::consts::TAU;
-                let t = self.center.offset(
-                    (a.cos() * r as f32).round() as i32,
-                    (a.sin() * r as f32).round() as i32,
-                );
-                if !self.in_reach(t, env)
-                    || self.colony.designations.contains_key(&t)
-                    || !world.objects_in_tile(t).is_empty()
-                {
+                let t = self.center.offset((a.cos() * r as f32).round() as i32, (a.sin() * r as f32).round() as i32);
+                if !self.in_reach(t, env) || self.colony.designations.contains_key(&t) || !world.objects_in_tile(t).is_empty() {
                     continue;
                 }
-                if self.projects.iter().any(|p| {
-                    let rr = p.rect();
-                    rr.contains(t)
-                }) || self.colony.stockpile.contains(&t)
-                {
+                if self.projects.iter().any(|p| { let rr = p.rect(); rr.contains(t) }) || self.colony.stockpile.contains(&t) {
                     continue;
                 }
-                n += self.colony.designate(
-                    world,
-                    content,
-                    j,
-                    TileRect::from_corners(t, t),
-                    Some(crop),
-                );
+                n += self.colony.designate(world, content, j, TileRect::from_corners(t, t), Some(crop));
             }
         }
         n
     }
 
-    fn start_hunt(
-        &mut self,
-        def: &TribeDef,
-        content: &Content,
-        life: &Life,
-        env: &TribeEnv,
-    ) -> bool {
+    fn start_hunt(&mut self, def: &TribeDef, content: &Content, life: &Life, env: &TribeEnv) -> bool {
         if !self.hunts.is_empty() {
             return false;
         }
-        let Some(pawn) = self
-            .colony
-            .pawns
-            .iter()
-            .find(|p| p.job.as_ref().is_none_or(|j| j.label == "Wandering"))
-        else {
-            return false;
-        };
+        let Some(pawn) = self.colony.pawns.iter().find(|p| p.job.as_ref().is_none_or(|j| j.label == "Wandering")) else { return false };
         let reach = (self.radius + 8) as f32 * TILE as f32;
         let (cx, cy) = self.center.center();
         let prey = life
             .creatures
             .iter()
             .filter(|c| c.dead.is_none() && dist(c.pos, (cx, cy)) <= reach)
-            .filter(|c| {
-                content
-                    .creatures
-                    .by_idx(c.def)
-                    .life
-                    .as_ref()
-                    .is_some_and(|l| l.tags.iter().any(|t| def.prey.contains(t)))
-            })
+            .filter(|c| content.creatures.by_idx(c.def).life.as_ref().is_some_and(|l| l.tags.iter().any(|t| def.prey.contains(t))))
             .min_by(|a, b| dist(a.pos, pawn.pos).total_cmp(&dist(b.pos, pawn.pos)));
         let Some(prey) = prey else { return false };
-        self.hunts.push(Hunt {
-            pawn: pawn.id,
-            prey: prey.id,
-            until: env.tick + env.hour() * 4,
-        });
+        self.hunts.push(Hunt { pawn: pawn.id, prey: prey.id, until: env.tick + env.hour() * 4 });
         true
     }
 
@@ -1130,27 +829,18 @@ impl Tribe {
         let mut beds = 0;
         let mut homes = Vec::new();
         for p in self.projects.iter().filter(|p| p.done) {
-            let Some(plan) = def.plans.iter().find(|pl| pl.id == p.plan) else {
-                continue;
-            };
+            let Some(plan) = def.plans.iter().find(|pl| pl.id == p.plan) else { continue };
             if plan.role != "home" {
                 continue;
             }
             for o in world.objects_in_rect(p.rect()) {
                 if let Some(inst) = world.objects.get(o)
-                    && inst.built
-                    && content.protos[inst.def].has_tag("bed")
-                {
-                    beds += 1;
-                }
+                    && inst.built && content.protos[inst.def].has_tag("bed") {
+                        beds += 1;
+                    }
             }
             for (t, objs) in plan_cells(plan, p.origin) {
-                let roof_only = objs.iter().all(|o| {
-                    content
-                        .objects
-                        .idx(o)
-                        .is_some_and(|d| content.protos[d].needs_support > 0)
-                });
+                let roof_only = objs.iter().all(|o| content.objects.idx(o).is_some_and(|d| content.protos[d].needs_support > 0));
                 if roof_only && world.walkable(t) {
                     homes.push(t);
                 }
@@ -1160,29 +850,15 @@ impl Tribe {
         self.homes = homes;
     }
 
-    fn place_phase(
-        &mut self,
-        plan: &PlanDef,
-        origin: TilePos,
-        phase: u8,
-        world: &World,
-        content: &Content,
-        rng: &mut Rng,
-    ) -> usize {
+    fn place_phase(&mut self, plan: &PlanDef, origin: TilePos, phase: u8, world: &World, content: &Content, rng: &mut Rng) -> usize {
         let mut n = 0;
         for (t, list) in plan_cells(plan, origin) {
             for id in list {
-                let Some(d) = content.objects.idx(id) else {
-                    continue;
-                };
+                let Some(d) = content.objects.idx(id) else { continue };
                 if (content.protos[d].needs_support > 0) != (phase == 1) {
                     continue;
                 }
-                if self
-                    .colony
-                    .place_blueprint(world, content, d, t, rng.next_u64())
-                    .is_ok()
-                {
+                if self.colony.place_blueprint(world, content, d, t, rng.next_u64()).is_ok() {
                     n += 1;
                 }
             }
@@ -1190,15 +866,7 @@ impl Tribe {
         n
     }
 
-    fn advance_projects(
-        &mut self,
-        def: &TribeDef,
-        world: &mut World,
-        content: &Content,
-        rng: &mut Rng,
-        env: &TribeEnv,
-        day: u64,
-    ) {
+    fn advance_projects(&mut self, def: &TribeDef, world: &mut World, content: &Content, rng: &mut Rng, env: &TribeEnv, day: u64) {
         for i in 0..self.projects.len() {
             if self.projects[i].done {
                 continue;
@@ -1209,20 +877,13 @@ impl Tribe {
                 self.projects[i].done = true;
                 continue;
             };
-            let pending = self
-                .colony
-                .blueprints
-                .values()
-                .any(|b| rect.contains(b.tile));
+            let pending = self.colony.blueprints.values().any(|b| rect.contains(b.tile));
             if pending {
                 if env.tick.saturating_sub(p.started) > env.day_ticks * 6 {
                     // Stuck for days: give up on it.
                     self.colony.cancel(world, content, rect);
                     self.projects[i].done = true;
-                    self.note(
-                        day,
-                        format!("gave up building a {}.", plan.name.to_lowercase()),
-                    );
+                    self.note(day, format!("gave up building a {}.", plan.name.to_lowercase()));
                 }
                 continue;
             }
@@ -1239,29 +900,10 @@ impl Tribe {
     }
 
     /// Choose what to build next and where. Returns true if work began.
-    fn start_project(
-        &mut self,
-        def: &TribeDef,
-        world: &World,
-        content: &Content,
-        rng: &mut Rng,
-        env: &TribeEnv,
-        others: &[TilePos],
-    ) -> bool {
-        let known: Vec<&PlanDef> = def
-            .plans
-            .iter()
-            .filter(|p| p.tech.as_ref().is_none_or(|t| self.techs.contains(t)))
-            .collect();
-        let has_fire = self
-            .projects
-            .iter()
-            .any(|p| known.iter().any(|pl| pl.id == p.plan && pl.role == "fire"));
-        let plan = match known
-            .iter()
-            .find(|p| p.role == "fire")
-            .filter(|_| !has_fire)
-        {
+    fn start_project(&mut self, def: &TribeDef, world: &World, content: &Content, rng: &mut Rng, env: &TribeEnv, others: &[TilePos]) -> bool {
+        let known: Vec<&PlanDef> = def.plans.iter().filter(|p| p.tech.as_ref().is_none_or(|t| self.techs.contains(t))).collect();
+        let has_fire = self.projects.iter().any(|p| known.iter().any(|pl| pl.id == p.plan && pl.role == "fire"));
+        let plan = match known.iter().find(|p| p.role == "fire").filter(|_| !has_fire) {
             Some(p) => *p,
             None => {
                 let homes: Vec<&&PlanDef> = known.iter().filter(|p| p.role == "home").collect();
@@ -1269,75 +911,39 @@ impl Tribe {
                     return false;
                 }
                 // The most advanced home they know, now and then an older one.
-                let k = if homes.len() > 1 && rng.chance(0.25) {
-                    homes.len() - 2
-                } else {
-                    homes.len() - 1
-                };
+                let k = if homes.len() > 1 && rng.chance(0.25) { homes.len() - 2 } else { homes.len() - 1 };
                 *homes[k]
             }
         };
         let (w, h) = plan_size(plan);
-        let Some(origin) = self.find_site(world, w, h, env, others) else {
-            return false;
-        };
+        let Some(origin) = self.find_site(world, w, h, env, others) else { return false };
         let n = self.place_phase(plan, origin, 0, world, content, rng);
         if n == 0 {
             return false;
         }
-        self.projects.push(Project {
-            plan: plan.id.clone(),
-            origin,
-            w,
-            h,
-            phase: 0,
-            started: env.tick,
-            done: false,
-        });
+        self.projects.push(Project { plan: plan.id.clone(), origin, w, h, phase: 0, started: env.tick, done: false });
         true
     }
 
-    fn find_site(
-        &self,
-        world: &World,
-        w: i32,
-        h: i32,
-        env: &TribeEnv,
-        others: &[TilePos],
-    ) -> Option<TilePos> {
-        let taken: Vec<TileRect> = self
-            .projects
-            .iter()
-            .map(|p| TileRect::from_corners(p.origin.offset(-1, -1), p.origin.offset(p.w, p.h)))
-            .collect();
+    fn find_site(&self, world: &World, w: i32, h: i32, env: &TribeEnv, others: &[TilePos]) -> Option<TilePos> {
+        let taken: Vec<TileRect> = self.projects.iter().map(|p| TileRect::from_corners(p.origin.offset(-1, -1), p.origin.offset(p.w, p.h))).collect();
         for r in 2..(self.radius - 3).max(3) {
             for k in 0..16 {
                 let a = k as f32 / 16.0 * std::f32::consts::TAU + r as f32 * 0.37;
-                let c = self.center.offset(
-                    (a.cos() * r as f32).round() as i32,
-                    (a.sin() * r as f32).round() as i32,
-                );
+                let c = self.center.offset((a.cos() * r as f32).round() as i32, (a.sin() * r as f32).round() as i32);
                 let origin = c.offset(-w / 2, -h / 2);
                 let outer = TileRect::from_corners(origin.offset(-1, -1), origin.offset(w, h));
                 let inner = TileRect::from_corners(origin, origin.offset(w - 1, h - 1));
                 if !self.in_reach(outer.min, env) || !self.in_reach(outer.max, env) {
                     continue;
                 }
-                if outer.iter().any(|t| {
-                    (t.chebyshev(self.center) <= 1)
-                        || !world.walkable(t)
-                        || self.colony.stockpile.contains(&t)
-                }) {
+                if outer.iter().any(|t| (t.chebyshev(self.center) <= 1) || !world.walkable(t) || self.colony.stockpile.contains(&t)) {
                     continue;
                 }
-                if taken.iter().any(|tr| tr.iter().any(|t| outer.contains(t)))
-                    || others.iter().any(|o| outer.contains(*o))
-                {
+                if taken.iter().any(|tr| tr.iter().any(|t| outer.contains(t))) || others.iter().any(|o| outer.contains(*o)) {
                     continue;
                 }
-                if inner.iter().any(|t| self.colony.items.at(t).is_some())
-                    || !world.objects_in_rect(inner).is_empty()
-                {
+                if inner.iter().any(|t| self.colony.items.at(t).is_some()) || !world.objects_in_rect(inner).is_empty() {
                     continue;
                 }
                 return Some(origin);
@@ -1367,14 +973,7 @@ impl Tribe {
         let mut meals = 0.0f32;
         let want = self.members.len() as f32 * per;
         for (item, value) in Self::food_items(def, content) {
-            let stacks: Vec<u32> = self
-                .colony
-                .items
-                .stacks
-                .values()
-                .filter(|s| s.item == item && s.reserved.is_none())
-                .map(|s| s.id)
-                .collect();
+            let stacks: Vec<u32> = self.colony.items.stacks.values().filter(|s| s.item == item && s.reserved.is_none()).map(|s| s.id).collect();
             for s in stacks {
                 while meals < want - 0.001 {
                     if self.colony.items.take(s, 1) == 0 {
@@ -1411,92 +1010,46 @@ impl Tribe {
         // ---- children
         let people = self.members.len() as u32;
         let food_days = self.food_days(def, content);
-        if people >= 2
-            && people < def.max_members
-            && people < self.capacity()
-            && food_days >= 2.0
-            && rng.chance((0.45 * self.traits[T_FERTILITY]).min(0.9))
-            && let Some(creature) = content.creatures.idx(&def.creature)
-        {
-            let at = nearest_tile(
-                self.homes
-                    .first()
-                    .copied()
-                    .unwrap_or(self.center.offset(0, 1)),
-                4,
-                |t| world.walkable(t),
-            )
-            .unwrap_or(self.center);
-            let pawn = self.colony.spawn_pawn(content, creature, at, rng);
-            self.dress(pawn, def, rng);
-            let span = rng.range_f32(
-                def.lifespan_days.0,
-                def.lifespan_days.1.max(def.lifespan_days.0),
-            ) * env.day_ticks as f32;
-            self.members.push(Member {
-                pawn,
-                age: 0,
-                lifespan: span as u64,
-                hunger: 0,
-                hurt: 0,
-            });
-            self.born += 1;
-            let name = self
-                .colony
-                .pawns
-                .last()
-                .map(|p| p.name.clone())
-                .unwrap_or_default();
-            self.note(day, format!("{name} was born."));
-        }
+        if people >= 2 && people < def.max_members && people < self.capacity() && food_days >= 2.0 && rng.chance((0.45 * self.traits[T_FERTILITY]).min(0.9))
+            && let Some(creature) = content.creatures.idx(&def.creature) {
+                let at = nearest_tile(self.homes.first().copied().unwrap_or(self.center.offset(0, 1)), 4, |t| world.walkable(t)).unwrap_or(self.center);
+                let pawn = self.colony.spawn_pawn(content, creature, at, rng);
+                self.dress(pawn, def, rng);
+                let span = rng.range_f32(def.lifespan_days.0, def.lifespan_days.1.max(def.lifespan_days.0)) * env.day_ticks as f32;
+                self.members.push(Member { pawn, age: 0, lifespan: span as u64, hunger: 0, hurt: 0 });
+                self.born += 1;
+                let name = self.colony.pawns.last().map(|p| p.name.clone()).unwrap_or_default();
+                self.note(day, format!("{name} was born."));
+            }
 
         // ---- research
         self.points += self.members.len() as f32 * 1.5 * self.traits[T_CURIOUS];
-        if self
-            .research
-            .as_ref()
-            .is_none_or(|r| self.techs.contains(r))
-        {
+        if self.research.as_ref().is_none_or(|r| self.techs.contains(r)) {
             let open: Vec<&TechDef> = def
                 .techs
                 .iter()
-                .filter(|t| {
-                    !self.techs.contains(&t.id) && t.after.iter().all(|a| self.techs.contains(a))
-                })
+                .filter(|t| !self.techs.contains(&t.id) && t.after.iter().all(|a| self.techs.contains(a)))
                 .collect();
             // What it studies follows what it values.
-            let pick = open
-                .iter()
-                .max_by(|a, b| self.tech_appeal(a).total_cmp(&self.tech_appeal(b)));
+            let pick = open.iter().max_by(|a, b| self.tech_appeal(a).total_cmp(&self.tech_appeal(b)));
             self.research = pick.map(|t| t.id.clone());
         }
-        if let Some(t) = self
-            .research
-            .clone()
-            .and_then(|r| def.techs.iter().find(|t| t.id == r))
-            && self.points >= t.points
-        {
-            self.points -= t.points;
-            self.techs.push(t.id.clone());
-            self.research = None;
-            self.note(day, format!("discovered {}.", t.name));
-            events.push(TribeEvent::Discovered {
-                tribe: self.name.clone(),
-                tech: t.name.clone(),
-            });
-        }
+        if let Some(t) = self.research.clone().and_then(|r| def.techs.iter().find(|t| t.id == r))
+            && self.points >= t.points {
+                self.points -= t.points;
+                self.techs.push(t.id.clone());
+                self.research = None;
+                self.note(day, format!("discovered {}.", t.name));
+                events.push(TribeEvent::Discovered { tribe: self.name.clone(), tech: t.name.clone() });
+            }
 
         // ---- learn: credit today's work with how things went
-        let prosperity = food_days.min(8.0) * 0.6
-            + self.members.len() as f32
-            + self.beds as f32 * 0.3
-            + self.techs.len() as f32 * 0.2;
+        let prosperity = food_days.min(8.0) * 0.6 + self.members.len() as f32 + self.beds as f32 * 0.3 + self.techs.len() as f32 * 0.2;
         let reward = ((prosperity - self.last_prosperity) / 3.0).clamp(-1.0, 1.0);
         let total: f32 = self.effort.iter().sum();
         if total > 0.0 && self.last_prosperity > 0.0 {
             for f in 0..FOCI {
-                self.culture[f] = (self.culture[f] + LEARN_RATE * reward * self.effort[f] / total)
-                    .clamp(0.2, 3.0);
+                self.culture[f] = (self.culture[f] + LEARN_RATE * reward * self.effort[f] / total).clamp(0.2, 3.0);
             }
         }
         self.last_prosperity = prosperity;
@@ -1528,14 +1081,7 @@ impl Tribe {
             for (item, _) in Self::food_items(def, content) {
                 let total = self.colony.items.total(item);
                 let mut take = (total as f32 * share) as u32;
-                let stacks: Vec<u32> = self
-                    .colony
-                    .items
-                    .stacks
-                    .values()
-                    .filter(|s| s.item == item && s.reserved.is_none())
-                    .map(|s| s.id)
-                    .collect();
+                let stacks: Vec<u32> = self.colony.items.stacks.values().filter(|s| s.item == item && s.reserved.is_none()).map(|s| s.id).collect();
                 let mut got = 0;
                 for s in stacks {
                     if take == 0 {
@@ -1549,16 +1095,8 @@ impl Tribe {
                     food.push((item, got));
                 }
             }
-            self.note(
-                day,
-                format!("{} people left to find new land.", pawns.len()),
-            );
-            band = Some(TribeEvent::Split {
-                from: self.id,
-                pawns,
-                members,
-                food,
-            });
+            self.note(day, format!("{} people left to find new land.", pawns.len()));
+            band = Some(TribeEvent::Split { from: self.id, pawns, members, food });
         }
         (starved, band)
     }
@@ -1602,17 +1140,11 @@ impl Tribe {
 
     /// Techs it knows, in the order of the def.
     pub fn known_techs<'a>(&self, def: &'a TribeDef) -> Vec<&'a TechDef> {
-        def.techs
-            .iter()
-            .filter(|t| self.techs.contains(&t.id))
-            .collect()
+        def.techs.iter().filter(|t| self.techs.contains(&t.id)).collect()
     }
 }
 
 /// Distinct tiles in all of a tribe's project footprints.
 pub fn footprint(t: &Tribe) -> BTreeSet<TilePos> {
-    t.projects
-        .iter()
-        .flat_map(|p| p.rect().iter().collect::<Vec<_>>())
-        .collect()
+    t.projects.iter().flat_map(|p| p.rect().iter().collect::<Vec<_>>()).collect()
 }

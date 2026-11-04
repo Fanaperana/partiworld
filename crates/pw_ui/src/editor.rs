@@ -99,16 +99,9 @@ impl Editor {
         if cells.is_empty() {
             return;
         }
-        let (minx, maxx) = cells
-            .iter()
-            .fold((i32::MAX, i32::MIN), |a, s| (a.0.min(s.dx), a.1.max(s.dx)));
-        let (miny, maxy) = cells
-            .iter()
-            .fold((i32::MAX, i32::MIN), |a, s| (a.0.min(s.dy), a.1.max(s.dy)));
-        let (w, h) = (
-            ((maxx - minx + 1) as usize).min(64),
-            ((maxy - miny + 1) as usize).min(64),
-        );
+        let (minx, maxx) = cells.iter().fold((i32::MAX, i32::MIN), |a, s| (a.0.min(s.dx), a.1.max(s.dx)));
+        let (miny, maxy) = cells.iter().fold((i32::MAX, i32::MIN), |a, s| (a.0.min(s.dy), a.1.max(s.dy)));
+        let (w, h) = (((maxx - minx + 1) as usize).min(64), ((maxy - miny + 1) as usize).min(64));
         self.w = w;
         self.h = h;
         self.cells = std::array::from_fn(|_| vec![NONE_MAT; w * h]);
@@ -144,11 +137,7 @@ impl Editor {
     }
 
     fn to_def(&self, c: &Content) -> Result<ObjectDef, String> {
-        let id = if self.id.contains(':') {
-            self.id.trim().to_string()
-        } else {
-            format!("user:{}", self.id.trim())
-        };
+        let id = if self.id.contains(':') { self.id.trim().to_string() } else { format!("user:{}", self.id.trim()) };
         if id.ends_with(':') {
             return Err("give the object an id".into());
         }
@@ -186,48 +175,24 @@ impl Editor {
         if layers.is_empty() {
             return Err("paint something first".into());
         }
-        let palette = chars
-            .iter()
-            .map(|(m, ch)| (*ch, c.mat_id_str(*m).to_string()))
-            .collect();
-        let tags: Vec<String> = self
-            .tags
-            .split(',')
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .collect();
+        let palette = chars.iter().map(|(m, ch)| (*ch, c.mat_id_str(*m).to_string())).collect();
+        let tags: Vec<String> = self.tags.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
         // Anything tagged as a roof follows the roof rule: a wall or rock within 6 tiles.
-        let needs_support = if tags.iter().any(|t| t == "roof") {
-            6
-        } else {
-            0
-        };
+        let needs_support = if tags.iter().any(|t| t == "roof") { 6 } else { 0 };
         Ok(ObjectDef {
             id,
             name: self.name.clone(),
             tags,
             shape: ShapeDef::Pattern { palette, layers },
-            anchor: if self.anchor_tile {
-                Anchor::Tile
-            } else {
-                Anchor::Center
-            },
+            anchor: if self.anchor_tile { Anchor::Tile } else { Anchor::Center },
             break_fraction: self.break_fraction,
             drops: if self.drop_item.is_empty() {
                 vec![]
             } else {
-                vec![DropDef {
-                    item: self.drop_item.clone(),
-                    min: self.drop_min,
-                    max: self.drop_max.max(self.drop_min),
-                }]
+                vec![DropDef { item: self.drop_item.clone(), min: self.drop_min, max: self.drop_max.max(self.drop_min) }]
             },
             build: self.buildable.then(|| BuildDef {
-                cost: if self.cost_n > 0 {
-                    vec![(self.cost_item.clone(), self.cost_n)]
-                } else {
-                    vec![]
-                },
+                cost: if self.cost_n > 0 { vec![(self.cost_item.clone(), self.cost_n)] } else { vec![] },
                 work: self.work.max(1),
                 category: self.category.clone(),
             }),
@@ -273,13 +238,7 @@ impl Editor {
         ui.horizontal(|ui| {
             ui.label("Start from");
             egui::ComboBox::from_id_salt("ed_load")
-                .selected_text(
-                    content
-                        .objects
-                        .get(&self.load_from)
-                        .map(|d| d.name.as_str())
-                        .unwrap_or("?"),
-                )
+                .selected_text(content.objects.get(&self.load_from).map(|d| d.name.as_str()).unwrap_or("?"))
                 .show_ui(ui, |ui| {
                     for (_, d) in content.objects.iter() {
                         ui.selectable_value(&mut self.load_from, d.id.clone(), &d.name);
@@ -290,10 +249,7 @@ impl Editor {
                 self.load(&content, &id);
             }
             if ui.button("New").clicked() {
-                *self = Editor {
-                    cell_px: self.cell_px,
-                    ..Editor::default()
-                };
+                *self = Editor { cell_px: self.cell_px, ..Editor::default() };
             }
         });
         ui.horizontal(|ui| {
@@ -316,14 +272,10 @@ impl Editor {
                 ui.selectable_value(&mut self.brush, b, b.to_string());
             }
             if ui.button("Fill layer").clicked() {
-                self.cells[self.layer]
-                    .iter_mut()
-                    .for_each(|m| *m = self.mat);
+                self.cells[self.layer].iter_mut().for_each(|m| *m = self.mat);
             }
             if ui.button("Clear layer").clicked() {
-                self.cells[self.layer]
-                    .iter_mut()
-                    .for_each(|m| *m = NONE_MAT);
+                self.cells[self.layer].iter_mut().for_each(|m| *m = NONE_MAT);
             }
         });
 
@@ -357,33 +309,21 @@ impl Editor {
                 let stroke = egui::Stroke::new(1.0, egui::Color32::from_black_alpha(60));
                 for col in 0..=self.w {
                     let x = origin.x + col as f32 * self.cell_px;
-                    painter.line_segment(
-                        [egui::pos2(x, origin.y), egui::pos2(x, origin.y + size.y)],
-                        stroke,
-                    );
+                    painter.line_segment([egui::pos2(x, origin.y), egui::pos2(x, origin.y + size.y)], stroke);
                 }
                 for r in 0..=self.h {
                     let y = origin.y + r as f32 * self.cell_px;
-                    painter.line_segment(
-                        [egui::pos2(origin.x, y), egui::pos2(origin.x + size.x, y)],
-                        stroke,
-                    );
+                    painter.line_segment([egui::pos2(origin.x, y), egui::pos2(origin.x + size.x, y)], stroke);
                 }
                 // Tile grid (8x8) in a brighter line.
                 let tile = egui::Stroke::new(1.0, egui::Color32::from_white_alpha(40));
                 for col in (0..=self.w).step_by(TILE as usize) {
                     let x = origin.x + col as f32 * self.cell_px;
-                    painter.line_segment(
-                        [egui::pos2(x, origin.y), egui::pos2(x, origin.y + size.y)],
-                        tile,
-                    );
+                    painter.line_segment([egui::pos2(x, origin.y), egui::pos2(x, origin.y + size.y)], tile);
                 }
                 for r in (0..=self.h).step_by(TILE as usize) {
                     let y = origin.y + r as f32 * self.cell_px;
-                    painter.line_segment(
-                        [egui::pos2(origin.x, y), egui::pos2(origin.x + size.x, y)],
-                        tile,
-                    );
+                    painter.line_segment([egui::pos2(origin.x, y), egui::pos2(origin.x + size.x, y)], tile);
                 }
             }
             if let Some(pos) = resp.interact_pointer_pos() {
@@ -407,33 +347,21 @@ impl Editor {
             // Palette.
             ui.vertical(|ui| {
                 ui.label("Material (right-drag erases)");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.mat_filter)
-                        .hint_text("filter")
-                        .desired_width(150.0),
-                );
-                egui::ScrollArea::vertical()
-                    .id_salt("ed_pal")
-                    .max_height(260.0)
-                    .show(ui, |ui| {
-                        for (i, m) in content.materials.iter() {
-                            let f = self.mat_filter.to_lowercase();
-                            if !f.is_empty()
-                                && !m.name.to_lowercase().contains(&f)
-                                && !m.id.contains(&f)
-                            {
-                                continue;
-                            }
-                            ui.horizontal(|ui| {
-                                let (r, p) = ui
-                                    .allocate_painter(egui::vec2(14.0, 14.0), egui::Sense::hover());
-                                p.rect_filled(r.rect, 2.0, to_egui(content.mats[i].color, false));
-                                let label = if i == 0 { "Eraser" } else { m.name.as_str() };
-                                ui.selectable_value(&mut self.mat, i as MatId, label)
-                                    .on_hover_text(&m.id);
-                            });
+                ui.add(egui::TextEdit::singleline(&mut self.mat_filter).hint_text("filter").desired_width(150.0));
+                egui::ScrollArea::vertical().id_salt("ed_pal").max_height(260.0).show(ui, |ui| {
+                    for (i, m) in content.materials.iter() {
+                        let f = self.mat_filter.to_lowercase();
+                        if !f.is_empty() && !m.name.to_lowercase().contains(&f) && !m.id.contains(&f) {
+                            continue;
                         }
-                    });
+                        ui.horizontal(|ui| {
+                            let (r, p) = ui.allocate_painter(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                            p.rect_filled(r.rect, 2.0, to_egui(content.mats[i].color, false));
+                            let label = if i == 0 { "Eraser" } else { m.name.as_str() };
+                            ui.selectable_value(&mut self.mat, i as MatId, label).on_hover_text(&m.id);
+                        });
+                    }
+                });
             });
         });
 
@@ -446,8 +374,7 @@ impl Editor {
             ui.text_edit_singleline(&mut self.name);
             ui.end_row();
             ui.label("Tags");
-            ui.text_edit_singleline(&mut self.tags)
-                .on_hover_text("comma separated, e.g. tree, flammable, wall, bush, rock");
+            ui.text_edit_singleline(&mut self.tags).on_hover_text("comma separated, e.g. tree, flammable, wall, bush, rock");
             ui.end_row();
             ui.label("Anchor");
             ui.checkbox(&mut self.anchor_tile, "snap to tile (buildings)");
@@ -458,13 +385,7 @@ impl Editor {
             ui.label("Drops");
             ui.horizontal(|ui| {
                 egui::ComboBox::from_id_salt("ed_drop")
-                    .selected_text(
-                        content
-                            .items
-                            .get(&self.drop_item)
-                            .map(|d| d.name.as_str())
-                            .unwrap_or("nothing"),
-                    )
+                    .selected_text(content.items.get(&self.drop_item).map(|d| d.name.as_str()).unwrap_or("nothing"))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.drop_item, String::new(), "nothing");
                         for (_, d) in content.items.iter() {
@@ -484,23 +405,13 @@ impl Editor {
                 ui.horizontal(|ui| {
                     ui.add(egui::DragValue::new(&mut self.cost_n).range(0..=99));
                     egui::ComboBox::from_id_salt("ed_cost")
-                        .selected_text(
-                            content
-                                .items
-                                .get(&self.cost_item)
-                                .map(|d| d.name.as_str())
-                                .unwrap_or("?"),
-                        )
+                        .selected_text(content.items.get(&self.cost_item).map(|d| d.name.as_str()).unwrap_or("?"))
                         .show_ui(ui, |ui| {
                             for (_, d) in content.items.iter() {
                                 ui.selectable_value(&mut self.cost_item, d.id.clone(), &d.name);
                             }
                         });
-                    ui.add(
-                        egui::DragValue::new(&mut self.work)
-                            .range(1..=5000)
-                            .prefix("work "),
-                    );
+                    ui.add(egui::DragValue::new(&mut self.work).range(1..=5000).prefix("work "));
                 });
                 ui.end_row();
                 ui.label("Category");

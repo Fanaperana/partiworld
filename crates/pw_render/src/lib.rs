@@ -31,13 +31,7 @@ pub struct RenderSettings {
 
 impl Default for RenderSettings {
     fn default() -> Self {
-        Self {
-            show_overlay: true,
-            see_through: true,
-            cursor: None,
-            overlay_alpha: 1.0,
-            show_zones: true,
-        }
+        Self { show_overlay: true, see_through: true, cursor: None, overlay_alpha: 1.0, show_zones: true }
     }
 }
 
@@ -90,13 +84,7 @@ impl SimClock {
 
 impl Default for SimClock {
     fn default() -> Self {
-        Self {
-            speed: 1,
-            acc: 0.0,
-            last_ticks: 0,
-            prev: HashMap::new(),
-            prev_life: HashMap::new(),
-        }
+        Self { speed: 1, acc: 0.0, last_ticks: 0, prev: HashMap::new(), prev_life: HashMap::new() }
     }
 }
 
@@ -182,20 +170,7 @@ impl Plugin for PwRenderPlugin {
             .add_systems(Startup, setup_camera)
             .add_systems(
                 Update,
-                (
-                    run_sim,
-                    update_view,
-                    sync_chunks,
-                    sync_items,
-                    sync_blueprints,
-                    sync_pawns,
-                    sync_animals,
-                    day_night,
-                    weather_fx,
-                    draw_flashes,
-                    draw_zones,
-                )
-                    .chain(),
+                (run_sim, update_view, sync_chunks, sync_items, sync_blueprints, sync_pawns, sync_animals, day_night, weather_fx, draw_flashes, draw_zones).chain(),
             );
     }
 }
@@ -205,33 +180,18 @@ fn setup_camera(mut commands: Commands, game: Res<GameRes>) {
     commands.spawn((
         Camera2d,
         MainCamera,
-        Projection::Orthographic(OrthographicProjection {
-            scale: 0.25,
-            ..OrthographicProjection::default_2d()
-        }),
+        Projection::Orthographic(OrthographicProjection { scale: 0.25, ..OrthographicProjection::default_2d() }),
         Transform::from_xyz(x, y, 100.0),
     ));
-    commands.spawn((
-        Sprite::from_color(Color::NONE, Vec2::ONE),
-        Transform::from_xyz(x, y, 50.0),
-        NightTint,
-    ));
-    commands.spawn((
-        Sprite::from_color(Color::NONE, Vec2::ONE),
-        Transform::from_xyz(x, y, 51.0),
-        FogTint,
-    ));
+    commands.spawn((Sprite::from_color(Color::NONE, Vec2::ONE), Transform::from_xyz(x, y, 50.0), NightTint));
+    commands.spawn((Sprite::from_color(Color::NONE, Vec2::ONE), Transform::from_xyz(x, y, 51.0), FogTint));
 }
 
 /// The sky tint for this moment: night blue, dawn pink-orange, dusk orange-violet.
 fn sky_color(g: &Game) -> Color {
     let l = g.light();
     let night = Vec3::new(0.03, 0.05, 0.16);
-    let glow = if l.dawn {
-        Vec3::new(1.0, 0.62, 0.45)
-    } else {
-        Vec3::new(0.95, 0.42, 0.28)
-    };
+    let glow = if l.dawn { Vec3::new(1.0, 0.62, 0.45) } else { Vec3::new(0.95, 0.42, 0.28) };
     let w = l.warm / (l.warm + l.dark + 1e-3);
     let c = night.lerp(glow, w);
     let a = (0.6 * l.dark + 0.22 * l.warm).min(0.72);
@@ -246,21 +206,14 @@ fn day_night(
     mut tint: Query<(&mut Transform, &mut Sprite), (With<NightTint>, Without<FogTint>)>,
     mut fog: Query<(&mut Transform, &mut Sprite), (With<FogTint>, Without<NightTint>)>,
 ) {
-    let (Ok((ct, p)), Ok(w)) = (cam.single(), window.single()) else {
-        return;
-    };
+    let (Ok((ct, p)), Ok(w)) = (cam.single(), window.single()) else { return };
     let scale = match p {
         Projection::Orthographic(o) => o.scale,
         _ => 1.0,
     };
     let size = Vec2::new(w.width(), w.height()) * scale * 1.1;
     let g = &game.0;
-    let fog_c = Color::srgba(
-        0.78,
-        0.8,
-        0.84,
-        (g.env.fog * 0.5 + g.env.clouds * 0.1).min(0.6),
-    );
+    let fog_c = Color::srgba(0.78, 0.8, 0.84, (g.env.fog * 0.5 + g.env.clouds * 0.1).min(0.6));
     for (q, c) in [(tint.single_mut(), sky_color(g)), (fog.single_mut(), fog_c)] {
         let Ok((mut t, mut s)) = q else { continue };
         t.translation.x = ct.translation.x;
@@ -286,9 +239,7 @@ fn weather_fx(
     if env.precip < 0.03 {
         return;
     }
-    let (Ok((ct, p)), Ok(w)) = (cam.single(), window.single()) else {
-        return;
-    };
+    let (Ok((ct, p)), Ok(w)) = (cam.single(), window.single()) else { return };
     let scale = match p {
         Projection::Orthographic(o) => o.scale,
         _ => 1.0,
@@ -303,26 +254,14 @@ fn weather_fx(
     let vel = Vec2::new(wx * push, wy * push * 0.5 - fall) * scale;
     let n = (env.precip * if snow { 380.0 } else { 520.0 }) as u32;
     let t = time.elapsed_secs();
-    let color = if snow {
-        Color::srgba(1.0, 1.0, 1.0, 0.85)
-    } else {
-        Color::srgba(0.72, 0.8, 0.95, 0.45)
-    };
-    let streak = if snow {
-        vel.normalize_or_zero() * 1.6 * scale
-    } else {
-        vel * 0.035
-    };
+    let color = if snow { Color::srgba(1.0, 1.0, 1.0, 0.85) } else { Color::srgba(0.72, 0.8, 0.95, 0.45) };
+    let streak = if snow { vel.normalize_or_zero() * 1.6 * scale } else { vel * 0.035 };
     for i in 0..n {
         let h = splitmix64(i as u64 * 7919 + 13);
         let (u, v) = (unit(h), unit(splitmix64(h ^ 0x51)));
         let speed = 0.7 + unit(splitmix64(h ^ 0x52)) * 0.6;
         // Each drop loops through the view; offset by its own phase.
-        let wobble = if snow {
-            (t * 1.7 + u * 20.0).sin() * 6.0 * scale
-        } else {
-            0.0
-        };
+        let wobble = if snow { (t * 1.7 + u * 20.0).sin() * 6.0 * scale } else { 0.0 };
         let mut pos = Vec2::new(u * view.x, v * view.y) + vel * speed * t + Vec2::new(wobble, 0.0);
         pos.x = pos.x.rem_euclid(view.x);
         pos.y = pos.y.rem_euclid(view.y);
@@ -337,18 +276,8 @@ fn run_sim(time: Res<Time>, mut clock: ResMut<SimClock>, mut game: ResMut<GameRe
     clock.acc += time.delta_secs() * TPS * m;
     let mut n = 0;
     while clock.acc >= 1.0 && n < 24 {
-        clock.prev = game
-            .0
-            .all_pawns()
-            .map(|(o, p)| (pawn_key(o, p.id), p.pos))
-            .collect();
-        clock.prev_life = game
-            .0
-            .life
-            .creatures
-            .iter()
-            .map(|c| (c.id, c.pos))
-            .collect();
+        clock.prev = game.0.all_pawns().map(|(o, p)| (pawn_key(o, p.id), p.pos)).collect();
+        clock.prev_life = game.0.life.creatures.iter().map(|c| (c.id, c.pos)).collect();
         game.0.step();
         clock.acc -= 1.0;
         n += 1;
@@ -365,9 +294,7 @@ fn update_view(
     cam: Query<(&Transform, &Projection), With<MainCamera>>,
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
-    let (Ok((t, p)), Ok(w)) = (cam.single(), window.single()) else {
-        return;
-    };
+    let (Ok((t, p)), Ok(w)) = (cam.single(), window.single()) else { return };
     let scale = match p {
         Projection::Orthographic(o) => o.scale,
         _ => 1.0,
@@ -375,20 +302,13 @@ fn update_view(
     let half = Vec2::new(w.width(), w.height()) * 0.5 * scale;
     let min = t.translation.truncate() - half;
     let max = t.translation.truncate() + half;
-    game.0.view = Some((
-        chunk_of(min.x as i32, min.y as i32),
-        chunk_of(max.x as i32, max.y as i32),
-    ));
+    game.0.view = Some((chunk_of(min.x as i32, min.y as i32), chunk_of(max.x as i32, max.y as i32)));
     game.0.stream_chunks();
 }
 
 fn new_image(w: u32, h: u32) -> Image {
     let mut img = Image::new_fill(
-        Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
+        Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         TextureDimension::D2,
         &[0, 0, 0, 0],
         TextureFormat::Rgba8UnormSrgb,
@@ -475,20 +395,11 @@ type Rect = (i32, i32, i32, i32);
 
 fn grow(r: Rect) -> Rect {
     let m = CHUNK - 1;
-    (
-        (r.0 - SHADE_REACH).max(0),
-        (r.1 - SHADE_REACH).max(0),
-        (r.2 + SHADE_REACH).min(m),
-        (r.3 + SHADE_REACH).min(m),
-    )
+    ((r.0 - SHADE_REACH).max(0), (r.1 - SHADE_REACH).max(0), (r.2 + SHADE_REACH).min(m), (r.3 + SHADE_REACH).min(m))
 }
 
 fn mat_at(v: &[MatId], lx: i32, ly: i32) -> MatId {
-    if (0..CHUNK).contains(&lx) && (0..CHUNK).contains(&ly) {
-        v[(ly * CHUNK + lx) as usize]
-    } else {
-        NONE_MAT
-    }
+    if (0..CHUNK).contains(&lx) && (0..CHUNK).contains(&ly) { v[(ly * CHUNK + lx) as usize] } else { NONE_MAT }
 }
 
 /// Paint ground + solids for the cells in `r` (local, inclusive).
@@ -557,15 +468,7 @@ fn hole_factor(holes: &[(f32, f32, f32)], x: f32, y: f32) -> f32 {
 }
 
 /// Paint the overlay layer (canopies, roofs) for the cells in `r`.
-fn paint_over(
-    chunk: &Chunk,
-    content: &Content,
-    seed: u64,
-    r: Rect,
-    over: &mut [u8],
-    holes: &[(f32, f32, f32)],
-    look: Look,
-) {
+fn paint_over(chunk: &Chunk, content: &Content, seed: u64, r: Rect, over: &mut [u8], holes: &[(f32, f32, f32)], look: Look) {
     let (ox, oy) = chunk.pos.origin();
     let overlay = &chunk.mat[2];
     for ly in r.1..=r.3 {
@@ -590,24 +493,14 @@ fn paint_over(
                     continue;
                 }
                 if look.autumn > 0 {
-                    let tone = if h < 0.35 {
-                        [196, 72, 38, 255]
-                    } else if h < 0.75 {
-                        [214, 128, 40, 255]
-                    } else {
-                        [226, 186, 64, 255]
-                    };
+                    let tone = if h < 0.35 { [196, 72, 38, 255] } else if h < 0.75 { [214, 128, 40, 255] } else { [226, 186, 64, 255] };
                     c = mix(c, tone, look.autumn as f32 / 10.0 * 0.85);
                 }
             }
-            if (rt.roof || rt.leaves)
-                && snowy(seed, x, y, if rt.roof { look.snow } else { look.snow / 2 })
-            {
+            if (rt.roof || rt.leaves) && snowy(seed, x, y, if rt.roof { look.snow } else { look.snow / 2 }) {
                 c = mix(c, SNOW, 0.85);
             }
-            let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                .iter()
-                .any(|&(dx, dy)| mat_at(overlay, lx + dx, ly + dy) == NONE_MAT);
+            let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| mat_at(overlay, lx + dx, ly + dy) == NONE_MAT);
             if edge {
                 c = shade(c, 0.8);
             } else if mat_at(overlay, lx + 1, ly + 1) == NONE_MAT {
@@ -642,12 +535,7 @@ fn sync_chunks(
         }
     }
     // Remove views for unloaded chunks.
-    let gone: Vec<ChunkPos> = views
-        .chunks
-        .keys()
-        .filter(|c| !g.world.chunks.contains_key(c))
-        .copied()
-        .collect();
+    let gone: Vec<ChunkPos> = views.chunks.keys().filter(|c| !g.world.chunks.contains_key(c)).copied().collect();
     for c in gone {
         let v = views.chunks.remove(&c).unwrap();
         commands.entity(v.base).despawn();
@@ -663,28 +551,12 @@ fn sync_chunks(
             let (x, y) = cp.origin();
             let center = Vec2::new(x as f32 + CHUNK as f32 / 2.0, y as f32 + CHUNK as f32 / 2.0);
             let base = commands
-                .spawn((
-                    Sprite::from_image(base_img.clone()),
-                    Transform::from_xyz(center.x, center.y, 0.0),
-                    ChunkLayer,
-                ))
+                .spawn((Sprite::from_image(base_img.clone()), Transform::from_xyz(center.x, center.y, 0.0), ChunkLayer))
                 .id();
             let over = commands
-                .spawn((
-                    Sprite::from_image(over_img.clone()),
-                    Transform::from_xyz(center.x, center.y, 20.0),
-                    ChunkLayer,
-                ))
+                .spawn((Sprite::from_image(over_img.clone()), Transform::from_xyz(center.x, center.y, 20.0), ChunkLayer))
                 .id();
-            views.chunks.insert(
-                *cp,
-                ChunkView {
-                    base,
-                    over,
-                    base_img,
-                    over_img,
-                },
-            );
+            views.chunks.insert(*cp, ChunkView { base, over, base_img, over_img });
             chunk.mark_render_all();
         }
         if !chunk.render_dirty {
@@ -719,28 +591,15 @@ fn sync_chunks(
     if holes != views.holes {
         let old = std::mem::replace(&mut views.holes, holes.clone());
         for &(hx, hy, r) in old.iter().chain(holes.iter()) {
-            let (x0, y0, x1, y1) = (
-                (hx - r) as i32,
-                (hy - r) as i32,
-                (hx + r) as i32 + 1,
-                (hy + r) as i32 + 1,
-            );
+            let (x0, y0, x1, y1) = ((hx - r) as i32, (hy - r) as i32, (hx + r) as i32 + 1, (hy + r) as i32 + 1);
             let (c0, c1) = (chunk_of(x0, y0), chunk_of(x1, y1));
             for cy in c0.y..=c1.y {
                 for cx in c0.x..=c1.x {
                     let cp = ChunkPos::new(cx, cy);
-                    let (Some(chunk), Some(v)) = (g.world.chunks.get(&cp), views.chunks.get(&cp))
-                    else {
-                        continue;
-                    };
+                    let (Some(chunk), Some(v)) = (g.world.chunks.get(&cp), views.chunks.get(&cp)) else { continue };
                     let (ox, oy) = cp.origin();
                     let m = CHUNK - 1;
-                    let rect = (
-                        (x0 - ox).clamp(0, m),
-                        (y0 - oy).clamp(0, m),
-                        (x1 - ox).clamp(0, m),
-                        (y1 - oy).clamp(0, m),
-                    );
+                    let rect = ((x0 - ox).clamp(0, m), (y0 - oy).clamp(0, m), (x1 - ox).clamp(0, m), (y1 - oy).clamp(0, m));
                     if let Some(mut img) = images.get_mut(&v.over_img) {
                         if let Some(data) = img.data.as_mut() {
                             paint_over(chunk, &content, seed, rect, data, &holes, look);
@@ -753,11 +612,7 @@ fn sync_chunks(
     // Overlay visibility / fade.
     for v in views.chunks.values() {
         if let Ok(mut vis) = vis.get_mut(v.over) {
-            vis.set_if_neq(if settings.show_overlay {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
-            });
+            vis.set_if_neq(if settings.show_overlay { Visibility::Inherited } else { Visibility::Hidden });
         }
         if let Ok(mut s) = sprites.get_mut(v.over) {
             let c = Color::srgba(1.0, 1.0, 1.0, settings.overlay_alpha);
@@ -795,12 +650,7 @@ fn see_through_holes(g: &Game, settings: &RenderSettings) -> Vec<(f32, f32, f32)
     holes
 }
 
-fn sprite_image(
-    images: &mut Assets<Image>,
-    s: &SpriteRt,
-    slots: &std::collections::BTreeMap<String, String>,
-    outline: bool,
-) -> Handle<Image> {
+fn sprite_image(images: &mut Assets<Image>, s: &SpriteRt, slots: &std::collections::BTreeMap<String, String>, outline: bool) -> Handle<Image> {
     let (w, h) = (s.w.max(1) as usize, s.h.max(1) as usize);
     let mut px: Vec<[u8; 4]> = vec![[0; 4]; w * h];
     for (i, p) in s.pixels.iter().enumerate().take(w * h) {
@@ -808,33 +658,20 @@ fn sprite_image(
     }
     for (i, slot) in &s.slots {
         if *i < px.len() {
-            px[*i] = slots
-                .get(slot)
-                .and_then(|h| parse_color(h))
-                .unwrap_or([255, 0, 255, 255]);
+            px[*i] = slots.get(slot).and_then(|h| parse_color(h)).unwrap_or([255, 0, 255, 255]);
         }
     }
     let pad = if outline { 1 } else { 0 };
     let (ow, oh) = (w + pad * 2, h + pad * 2);
     let mut img = new_image(ow as u32, oh as u32);
     if let Some(data) = img.data.as_mut() {
-        let solid = |x: i64, y: i64| {
-            x >= 0
-                && y >= 0
-                && (x as usize) < w
-                && (y as usize) < h
-                && px[y as usize * w + x as usize][3] > 0
-        };
+        let solid = |x: i64, y: i64| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && px[y as usize * w + x as usize][3] > 0;
         for oy in 0..oh {
             for ox in 0..ow {
                 let (x, y) = (ox as i64 - pad as i64, oy as i64 - pad as i64);
                 let c = if solid(x, y) {
                     px[y as usize * w + x as usize]
-                } else if outline
-                    && [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                        .iter()
-                        .any(|&(dx, dy)| solid(x + dx, y + dy))
-                {
+                } else if outline && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| solid(x + dx, y + dy)) {
                     [20, 16, 22, 220]
                 } else {
                     [0, 0, 0, 0]
@@ -857,11 +694,7 @@ fn shadow_image(images: &mut Assets<Image>) -> Handle<Image> {
                 let dx = (x as f32 + 0.5 - w as f32 / 2.0) / (w as f32 / 2.0);
                 let dy = (y as f32 + 0.5 - h as f32 / 2.0) / (h as f32 / 2.0);
                 let d = dx * dx + dy * dy;
-                let a = if d < 1.0 {
-                    ((1.0 - d) * 140.0) as u8
-                } else {
-                    0
-                };
+                let a = if d < 1.0 { ((1.0 - d) * 140.0) as u8 } else { 0 };
                 let i = ((y * w + x) * 4) as usize;
                 data[i..i + 4].copy_from_slice(&[0, 0, 0, a]);
             }
@@ -870,23 +703,11 @@ fn shadow_image(images: &mut Assets<Image>) -> Handle<Image> {
     images.add(img)
 }
 
-fn item_image(
-    views: &mut Views,
-    images: &mut Assets<Image>,
-    content: &Content,
-    item: usize,
-) -> Handle<Image> {
+fn item_image(views: &mut Views, images: &mut Assets<Image>, content: &Content, item: usize) -> Handle<Image> {
     views
         .item_images
         .entry(item)
-        .or_insert_with(|| {
-            sprite_image(
-                images,
-                &content.item_rt[item].sprite,
-                &Default::default(),
-                true,
-            )
-        })
+        .or_insert_with(|| sprite_image(images, &content.item_rt[item].sprite, &Default::default(), true))
         .clone()
 }
 
@@ -900,21 +721,11 @@ fn check_content(views: &mut Views, content: &std::sync::Arc<Content>) {
     }
 }
 
-fn sync_items(
-    mut commands: Commands,
-    game: Res<GameRes>,
-    mut views: ResMut<Views>,
-    mut images: ResMut<Assets<Image>>,
-) {
+fn sync_items(mut commands: Commands, game: Res<GameRes>, mut views: ResMut<Views>, mut images: ResMut<Assets<Image>>) {
     let g = &game.0;
     check_content(&mut views, &g.content);
     let live: HashSet<u64> = g.all_items().map(|(o, s)| pawn_key(o, s.id)).collect();
-    let gone: Vec<u64> = views
-        .items
-        .keys()
-        .filter(|k| !live.contains(k))
-        .copied()
-        .collect();
+    let gone: Vec<u64> = views.items.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
         let (e, _, _) = views.items.remove(&id).unwrap();
         commands.entity(e).despawn();
@@ -934,28 +745,16 @@ fn sync_items(
                     commands.entity(e).despawn();
                 }
                 let img = item_image(&mut views, &mut images, &g.content, s.item);
-                let e = commands
-                    .spawn((Sprite::from_image(img), pos, ItemSprite))
-                    .id();
+                let e = commands.spawn((Sprite::from_image(img), pos, ItemSprite)).id();
                 views.items.insert(key, (e, s.item, s.tile));
             }
         }
     }
 }
 
-fn sync_blueprints(
-    mut commands: Commands,
-    game: Res<GameRes>,
-    mut views: ResMut<Views>,
-    mut images: ResMut<Assets<Image>>,
-) {
+fn sync_blueprints(mut commands: Commands, game: Res<GameRes>, mut views: ResMut<Views>, mut images: ResMut<Assets<Image>>) {
     let g = &game.0;
-    let gone: Vec<u32> = views
-        .blueprints
-        .keys()
-        .filter(|k| !g.colony.blueprints.contains_key(k))
-        .copied()
-        .collect();
+    let gone: Vec<u32> = views.blueprints.keys().filter(|k| !g.colony.blueprints.contains_key(k)).copied().collect();
     for id in gone {
         let e = views.blueprints.remove(&id).unwrap();
         commands.entity(e).despawn();
@@ -971,16 +770,9 @@ fn sync_blueprints(
             .entry(key)
             .or_insert_with(|| {
                 let cells = content.protos[b.def].cells(b.seed);
-                let (minx, maxx) = cells
-                    .iter()
-                    .fold((i32::MAX, i32::MIN), |a, c| (a.0.min(c.dx), a.1.max(c.dx)));
-                let (miny, maxy) = cells
-                    .iter()
-                    .fold((i32::MAX, i32::MIN), |a, c| (a.0.min(c.dy), a.1.max(c.dy)));
-                let (w, h) = (
-                    (maxx - minx + 1).max(1) as u32,
-                    (maxy - miny + 1).max(1) as u32,
-                );
+                let (minx, maxx) = cells.iter().fold((i32::MAX, i32::MIN), |a, c| (a.0.min(c.dx), a.1.max(c.dx)));
+                let (miny, maxy) = cells.iter().fold((i32::MAX, i32::MIN), |a, c| (a.0.min(c.dy), a.1.max(c.dy)));
+                let (w, h) = ((maxx - minx + 1).max(1) as u32, (maxy - miny + 1).max(1) as u32);
                 let mut img = new_image(w, h);
                 if let Some(data) = img.data.as_mut() {
                     // See-through ghost: faint fill, bright edges.
@@ -989,18 +781,11 @@ fn sync_blueprints(
                         let col = content.mat_rt(c.mat).color;
                         let (px, py) = ((c.dx - minx) as u32, (maxy - c.dy) as u32);
                         let i = ((py * w + px) * 4) as usize;
-                        let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                            .iter()
-                            .any(|&(dx, dy)| !filled.contains(&(c.dx + dx, c.dy + dy)));
+                        let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| !filled.contains(&(c.dx + dx, c.dy + dy)));
                         let ghost = if edge {
                             [150, 200, 255, 210]
                         } else {
-                            [
-                                (col[0] as f32 * 0.3 + 70.0) as u8,
-                                (col[1] as f32 * 0.3 + 110.0) as u8,
-                                235,
-                                70,
-                            ]
+                            [(col[0] as f32 * 0.3 + 70.0) as u8, (col[1] as f32 * 0.3 + 110.0) as u8, 235, 70]
                         };
                         data[i..i + 4].copy_from_slice(&ghost);
                     }
@@ -1011,13 +796,7 @@ fn sync_blueprints(
         let (handle, minx, miny, w, h) = img;
         let cx = b.origin.0 as f32 + minx as f32 + w as f32 / 2.0;
         let cy = b.origin.1 as f32 + miny as f32 + h as f32 / 2.0;
-        let e = commands
-            .spawn((
-                Sprite::from_image(handle),
-                Transform::from_xyz(cx, cy, 4.0),
-                BlueprintSprite,
-            ))
-            .id();
+        let e = commands.spawn((Sprite::from_image(handle), Transform::from_xyz(cx, cy, 4.0), BlueprintSprite)).id();
         views.blueprints.insert(b.id, e);
     }
 }
@@ -1027,36 +806,14 @@ fn sync_pawns(
     game: Res<GameRes>,
     mut views: ResMut<Views>,
     mut images: ResMut<Assets<Image>>,
-    mut carry: Query<
-        (&mut Sprite, &mut Visibility, &mut Transform),
-        (With<CarrySprite>, Without<PawnSprite>),
-    >,
-    mut bodies: Query<
-        &mut Transform,
-        (
-            With<PawnSprite>,
-            Without<CarrySprite>,
-            Without<ShadowSprite>,
-        ),
-    >,
-    mut shadows: Query<
-        &mut Transform,
-        (
-            With<ShadowSprite>,
-            Without<CarrySprite>,
-            Without<PawnSprite>,
-        ),
-    >,
+    mut carry: Query<(&mut Sprite, &mut Visibility, &mut Transform), (With<CarrySprite>, Without<PawnSprite>)>,
+    mut bodies: Query<&mut Transform, (With<PawnSprite>, Without<CarrySprite>, Without<ShadowSprite>)>,
+    mut shadows: Query<&mut Transform, (With<ShadowSprite>, Without<CarrySprite>, Without<PawnSprite>)>,
     clock: Res<SimClock>,
 ) {
     let g = &game.0;
     let live: HashSet<u64> = g.all_pawns().map(|(o, p)| pawn_key(o, p.id)).collect();
-    let gone: Vec<u64> = views
-        .pawns
-        .keys()
-        .filter(|k| !live.contains(k))
-        .copied()
-        .collect();
+    let gone: Vec<u64> = views.pawns.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
         let (a, b, sh) = views.pawns.remove(&id).unwrap();
         commands.entity(a).despawn();
@@ -1094,22 +851,10 @@ fn sync_pawns(
                 }
             }
             None => {
-                let img = sprite_image(
-                    &mut images,
-                    &g.content.creature_rt[p.creature].sprite,
-                    &p.slots,
-                    true,
-                );
-                let e = commands
-                    .spawn((Sprite::from_image(img), pos, PawnSprite))
-                    .id();
+                let img = sprite_image(&mut images, &g.content.creature_rt[p.creature].sprite, &p.slots, true);
+                let e = commands.spawn((Sprite::from_image(img), pos, PawnSprite)).id();
                 let c = commands
-                    .spawn((
-                        Sprite::default(),
-                        carry_pos,
-                        Visibility::Hidden,
-                        CarrySprite,
-                    ))
+                    .spawn((Sprite::default(), carry_pos, Visibility::Hidden, CarrySprite))
                     .id();
                 let shadow = match &views.shadow_img {
                     Some(h) => h.clone(),
@@ -1119,9 +864,7 @@ fn sync_pawns(
                         h
                     }
                 };
-                let sh = commands
-                    .spawn((Sprite::from_image(shadow), shadow_pos, ShadowSprite))
-                    .id();
+                let sh = commands.spawn((Sprite::from_image(shadow), shadow_pos, ShadowSprite)).id();
                 views.pawns.insert(key, (e, c, sh));
             }
         }
@@ -1130,21 +873,13 @@ fn sync_pawns(
 
 /// Rotate a colour's hue by `turn` (fraction of a full turn).
 fn hue_shift(c: [u8; 4], turn: f32) -> [u8; 4] {
-    let (r, g, b) = (
-        c[0] as f32 / 255.0,
-        c[1] as f32 / 255.0,
-        c[2] as f32 / 255.0,
-    );
+    let (r, g, b) = (c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0);
     let a = turn * std::f32::consts::TAU;
     let (s, co) = a.sin_cos();
     // Rotation around the grey axis.
     let k = (1.0 - co) / 3.0;
     let q = (1.0f32 / 3.0).sqrt() * s;
-    let m = [
-        [co + k, k - q, k + q],
-        [k + q, co + k, k - q],
-        [k - q, k + q, co + k],
-    ];
+    let m = [[co + k, k - q, k + q], [k + q, co + k, k - q], [k - q, k + q, co + k]];
     let f = |row: [f32; 3]| ((row[0] * r + row[1] * g + row[2] * b).clamp(0.0, 1.0) * 255.0) as u8;
     [f(m[0]), f(m[1]), f(m[2]), c[3]]
 }
@@ -1160,39 +895,20 @@ fn sync_animals(
 ) {
     let g = &game.0;
     let live: HashSet<u32> = g.life.creatures.iter().map(|c| c.id).collect();
-    let gone: Vec<u32> = views
-        .animals
-        .keys()
-        .filter(|k| !live.contains(k))
-        .copied()
-        .collect();
+    let gone: Vec<u32> = views.animals.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
         let (e, _) = views.animals.remove(&id).unwrap();
         commands.entity(e).despawn();
     }
     for c in &g.life.creatures {
         let def = g.content.creatures.by_idx(c.def);
-        let n_slots = def
-            .slots
-            .values()
-            .map(|v| v.len())
-            .max()
-            .unwrap_or(1)
-            .max(1);
+        let n_slots = def.slots.values().map(|v| v.len()).max().unwrap_or(1).max(1);
         let pick = (c.species as usize * 7 + c.id as usize) % n_slots;
         // 12 hue steps of colour drift.
-        let hue = ((c.genes[pw_life::G_HUE] - 1.0) * 6.0)
-            .round()
-            .clamp(-6.0, 6.0) as i8;
+        let hue = ((c.genes[pw_life::G_HUE] - 1.0) * 6.0).round().clamp(-6.0, 6.0) as i8;
         let key = (c.def, pick as u8, (hue + 6) as u8);
         let at = clock.draw_pos_life(c);
-        let scale = (c.genes[pw_life::G_SIZE]
-            * if c.age < 2 * pw_game::DAY_TICKS {
-                0.75
-            } else {
-                1.0
-            })
-        .clamp(0.5, 2.0);
+        let scale = (c.genes[pw_life::G_SIZE] * if c.age < 2 * pw_game::DAY_TICKS { 0.75 } else { 1.0 }).clamp(0.5, 2.0);
         let t = Transform::from_xyz(at.x, at.y, 9.5).with_scale(Vec3::splat(scale));
         match views.animals.get(&c.id) {
             Some(&(e, k)) if k == key => {
@@ -1211,27 +927,17 @@ fn sync_animals(
                             .slots
                             .iter()
                             .map(|(k, v)| {
-                                let base = v
-                                    .get(pick % v.len().max(1))
-                                    .and_then(|h| parse_color(h))
-                                    .unwrap_or([200, 0, 200, 255]);
+                                let base = v.get(pick % v.len().max(1)).and_then(|h| parse_color(h)).unwrap_or([200, 0, 200, 255]);
                                 let c = hue_shift(base, hue as f32 / 24.0);
                                 (k.clone(), format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]))
                             })
                             .collect();
-                        let h = sprite_image(
-                            &mut images,
-                            &g.content.creature_rt[c.def].sprite,
-                            &slots,
-                            true,
-                        );
+                        let h = sprite_image(&mut images, &g.content.creature_rt[c.def].sprite, &slots, true);
                         views.animal_images.insert(key, h.clone());
                         h
                     }
                 };
-                let e = commands
-                    .spawn((Sprite::from_image(img), t, AnimalSprite))
-                    .id();
+                let e = commands.spawn((Sprite::from_image(img), t, AnimalSprite)).id();
                 views.animals.insert(c.id, (e, key));
             }
         }
@@ -1248,11 +954,7 @@ fn draw_flashes(game: Res<GameRes>, mut gizmos: Gizmos) {
         let a = 1.0 - age;
         for k in 0..6 {
             let rr = r * (0.3 + 0.15 * k as f32) * (1.0 + age);
-            gizmos.circle_2d(
-                Isometry2d::from_translation(Vec2::new(x, y)),
-                rr,
-                Color::srgba(1.0, 0.97, 0.8, a * (1.0 - k as f32 / 6.0)),
-            );
+            gizmos.circle_2d(Isometry2d::from_translation(Vec2::new(x, y)), rr, Color::srgba(1.0, 0.97, 0.8, a * (1.0 - k as f32 / 6.0)));
         }
     }
 }
@@ -1265,40 +967,24 @@ fn draw_zones(game: Res<GameRes>, settings: Res<RenderSettings>, mut gizmos: Giz
     let size = Vec2::splat(TILE as f32 - 1.0);
     for t in &g.colony.stockpile {
         let (x, y) = t.center();
-        gizmos.rect_2d(
-            Isometry2d::from_translation(Vec2::new(x, y)),
-            size,
-            Color::srgba(1.0, 0.85, 0.3, 0.35),
-        );
+        gizmos.rect_2d(Isometry2d::from_translation(Vec2::new(x, y)), size, Color::srgba(1.0, 0.85, 0.3, 0.35));
     }
     // Tribe lands: a faint ring in the tribe's colour.
     for tr in g.tribes.living() {
         let c = parse_color(&tr.color).unwrap_or([255, 255, 255, 255]);
         let (x, y) = tr.center.center();
         let r = (tr.radius as f32 + 0.5) * TILE as f32;
-        gizmos.circle_2d(
-            Isometry2d::from_translation(Vec2::new(x, y)),
-            r,
-            Color::srgba_u8(c[0], c[1], c[2], 70),
-        );
+        gizmos.circle_2d(Isometry2d::from_translation(Vec2::new(x, y)), r, Color::srgba_u8(c[0], c[1], c[2], 70));
         for t in &tr.colony.stockpile {
             let (x, y) = t.center();
-            gizmos.rect_2d(
-                Isometry2d::from_translation(Vec2::new(x, y)),
-                size,
-                Color::srgba_u8(c[0], c[1], c[2], 50),
-            );
+            gizmos.rect_2d(Isometry2d::from_translation(Vec2::new(x, y)), size, Color::srgba_u8(c[0], c[1], c[2], 50));
         }
     }
     for (t, d) in &g.colony.designations {
         let (x, y) = t.center();
         let c = parse_color(&g.content.jobs.by_idx(d.job).color).unwrap_or([255, 255, 255, 255]);
         let color = Color::srgba_u8(c[0], c[1], c[2], 220);
-        gizmos.rect_2d(
-            Isometry2d::from_translation(Vec2::new(x, y)),
-            size - Vec2::splat(1.0),
-            color,
-        );
+        gizmos.rect_2d(Isometry2d::from_translation(Vec2::new(x, y)), size - Vec2::splat(1.0), color);
         if d.reserved.is_some() {
             gizmos.circle_2d(Isometry2d::from_translation(Vec2::new(x, y)), 1.2, color);
         }

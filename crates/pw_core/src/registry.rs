@@ -16,11 +16,7 @@ pub struct Registry<T> {
 
 impl<T> Default for Registry<T> {
     fn default() -> Self {
-        Self {
-            items: Vec::new(),
-            sources: Vec::new(),
-            index: HashMap::new(),
-        }
+        Self { items: Vec::new(), sources: Vec::new(), index: HashMap::new() }
     }
 }
 

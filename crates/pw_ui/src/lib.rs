@@ -37,15 +37,7 @@ pub enum Tool {
 
 impl Tool {
     fn drags(&self) -> bool {
-        matches!(
-            self,
-            Tool::Order(_)
-                | Tool::Cancel
-                | Tool::Stockpile
-                | Tool::Unzone
-                | Tool::Build(_)
-                | Tool::Plant(_)
-        )
+        matches!(self, Tool::Order(_) | Tool::Cancel | Tool::Stockpile | Tool::Unzone | Tool::Build(_) | Tool::Plant(_))
     }
 }
 
@@ -137,10 +129,7 @@ fn hotkey_tools(ui: &UiState) -> Vec<(KeyCode, &'static str, Tool)> {
 }
 
 fn hotkey_label(ui: &UiState, tool: &Tool) -> Option<&'static str> {
-    hotkey_tools(ui)
-        .into_iter()
-        .find(|(_, _, t)| t == tool)
-        .map(|(_, k, _)| k)
+    hotkey_tools(ui).into_iter().find(|(_, _, t)| t == tool).map(|(_, k, _)| k)
 }
 
 /// Colonist nearest to a world point, within `reach` particles.
@@ -160,16 +149,8 @@ impl Plugin for PwUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiState>()
             .add_systems(Startup, init_ui)
-            .add_systems(
-                Update,
-                camera_keys.run_if(not(egui_wants_any_keyboard_input)),
-            )
-            .add_systems(
-                Update,
-                (camera_mouse, world_tools)
-                    .chain()
-                    .run_if(not(egui_wants_any_pointer_input)),
-            )
+            .add_systems(Update, camera_keys.run_if(not(egui_wants_any_keyboard_input)))
+            .add_systems(Update, (camera_mouse, world_tools).chain().run_if(not(egui_wants_any_pointer_input)))
             .add_systems(Update, (draw_tool_preview, follow_camera, watch_mods))
             .add_systems(EguiPrimaryContextPass, ui_panels);
     }
@@ -186,12 +167,7 @@ fn mods_fingerprint(dir: &std::path::Path) -> u64 {
             if path.is_dir() {
                 walk(&path, h);
             } else if let Ok(m) = e.metadata() {
-                let t = m
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_nanos() as u64)
-                    .unwrap_or(0);
+                let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as u64).unwrap_or(0);
                 *h = splitmix64(*h ^ hash_str(&path.to_string_lossy()) ^ m.len() ^ t);
             }
         }
@@ -202,12 +178,7 @@ fn mods_fingerprint(dir: &std::path::Path) -> u64 {
 }
 
 /// Hot reload: when a mod file changes on disk, reload mods into the running world.
-fn watch_mods(
-    time: Res<Time>,
-    mut ui: ResMut<UiState>,
-    mut game: ResMut<GameRes>,
-    mut state: Local<(f32, u64)>,
-) {
+fn watch_mods(time: Res<Time>, mut ui: ResMut<UiState>, mut game: ResMut<GameRes>, mut state: Local<(f32, u64)>) {
     state.0 -= time.delta_secs();
     if state.0 > 0.0 {
         return;
@@ -245,16 +216,9 @@ fn camera_keys(
     mut game: ResMut<GameRes>,
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
-    let Ok((mut t, mut p)) = cam.single_mut() else {
-        return;
-    };
-    let Projection::Orthographic(o) = p.as_mut() else {
-        return;
-    };
-    let maxz = window
-        .single()
-        .map(|w| pw_render::max_zoom(w.width(), w.height()))
-        .unwrap_or(2.0);
+    let Ok((mut t, mut p)) = cam.single_mut() else { return };
+    let Projection::Orthographic(o) = p.as_mut() else { return };
+    let maxz = window.single().map(|w| pw_render::max_zoom(w.width(), w.height())).unwrap_or(2.0);
     let mut d = Vec2::ZERO;
     if keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]) {
         d.y += 1.0;
@@ -271,11 +235,7 @@ fn camera_keys(
     if d != Vec2::ZERO {
         ui.follow = false;
     }
-    let fast = if keys.pressed(KeyCode::ShiftLeft) {
-        2.5
-    } else {
-        1.0
-    };
+    let fast = if keys.pressed(KeyCode::ShiftLeft) { 2.5 } else { 1.0 };
     t.translation += (d * 900.0 * o.scale * fast * time.delta_secs()).extend(0.0);
     if keys.pressed(KeyCode::KeyQ) {
         o.scale = o.scale * (1.0 + 2.0 * time.delta_secs());
@@ -288,11 +248,7 @@ fn camera_keys(
     if keys.just_pressed(KeyCode::Space) {
         clock.speed = if clock.speed == 0 { 1 } else { 0 };
     }
-    for (k, s) in [
-        (KeyCode::Digit1, 1),
-        (KeyCode::Digit2, 2),
-        (KeyCode::Digit3, 3),
-    ] {
+    for (k, s) in [(KeyCode::Digit1, 1), (KeyCode::Digit2, 2), (KeyCode::Digit3, 3)] {
         if keys.just_pressed(k) {
             clock.speed = s;
         }
@@ -365,12 +321,7 @@ fn follow_camera(
     if !ui.follow {
         return;
     }
-    let Some(p) = ui
-        .selected
-        .and_then(|id| game.0.colony.pawns.iter().find(|p| p.id == id))
-    else {
-        return;
-    };
+    let Some(p) = ui.selected.and_then(|id| game.0.colony.pawns.iter().find(|p| p.id == id)) else { return };
     if let Ok(mut t) = cam.single_mut() {
         let d = clock.draw_pos(p);
         t.translation.x = d.x;
@@ -386,22 +337,11 @@ fn camera_mouse(
     mut ui: ResMut<UiState>,
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
-    let Ok((mut t, mut p)) = cam.single_mut() else {
-        return;
-    };
-    let Projection::Orthographic(o) = p.as_mut() else {
-        return;
-    };
-    let maxz = window
-        .single()
-        .map(|w| pw_render::max_zoom(w.width(), w.height()))
-        .unwrap_or(2.0);
+    let Ok((mut t, mut p)) = cam.single_mut() else { return };
+    let Projection::Orthographic(o) = p.as_mut() else { return };
+    let maxz = window.single().map(|w| pw_render::max_zoom(w.width(), w.height())).unwrap_or(2.0);
     if scroll.delta.y != 0.0 {
-        let f = if scroll.delta.y > 0.0 {
-            1.0 / 1.15
-        } else {
-            1.15
-        };
+        let f = if scroll.delta.y > 0.0 { 1.0 / 1.15 } else { 1.15 };
         o.scale = (o.scale * f).clamp(0.04, maxz);
     }
     if buttons.pressed(MouseButton::Middle) {
@@ -477,9 +417,7 @@ fn world_tools(
                         match (n, g.last_build_error.clone()) {
                             (0, Some(e)) => format!("Can't build: {e}"),
                             (0, None) => "Can't build there".into(),
-                            (n, Some(e)) if e.contains("roof") => {
-                                format!("{n} blueprints placed; some skipped: {e}")
-                            }
+                            (n, Some(e)) if e.contains("roof") => format!("{n} blueprints placed; some skipped: {e}"),
                             (n, _) => format!("{n} blueprints placed"),
                         }
                     }
@@ -525,31 +463,16 @@ fn world_tools(
                 g.use_power(&id, x, y, ui.power_radius);
             }
         }
-        Tool::SpawnColonist if buttons.just_pressed(MouseButton::Left) => {
-            g.spawn_colonist(tile_of(x, y))
-        }
+        Tool::SpawnColonist if buttons.just_pressed(MouseButton::Left) => g.spawn_colonist(tile_of(x, y)),
         _ => {}
     }
 }
 
-fn draw_tool_preview(
-    ui: Res<UiState>,
-    mut gizmos: Gizmos,
-    game: Res<GameRes>,
-    time: Res<Time>,
-    clock: Res<SimClock>,
-) {
-    if let Some(p) = ui
-        .selected
-        .and_then(|id| game.0.colony.pawns.iter().find(|p| p.id == id))
-    {
+fn draw_tool_preview(ui: Res<UiState>, mut gizmos: Gizmos, game: Res<GameRes>, time: Res<Time>, clock: Res<SimClock>) {
+    if let Some(p) = ui.selected.and_then(|id| game.0.colony.pawns.iter().find(|p| p.id == id)) {
         let pulse = 6.5 + (time.elapsed_secs() * 4.0).sin() * 0.4;
         let at = clock.draw_pos(p);
-        gizmos.circle_2d(
-            Isometry2d::from_translation(at),
-            pulse,
-            Color::srgb(1.0, 0.95, 0.4),
-        );
+        gizmos.circle_2d(Isometry2d::from_translation(at), pulse, Color::srgb(1.0, 0.95, 0.4));
         if let Some(&t) = p.path.first() {
             let (x, y) = t.center();
             gizmos.line_2d(at, Vec2::new(x, y), Color::srgba(1.0, 0.95, 0.4, 0.35));
@@ -579,25 +502,13 @@ fn draw_tool_preview(
     };
     match (&ui.tool, ui.drag_start) {
         (Tool::Paint, _) => {
-            gizmos.circle_2d(
-                Isometry2d::from_translation(cur),
-                ui.paint_radius as f32 + 0.5,
-                Color::WHITE,
-            );
+            gizmos.circle_2d(Isometry2d::from_translation(cur), ui.paint_radius as f32 + 0.5, Color::WHITE);
         }
         (Tool::Power(_), _) => {
-            gizmos.circle_2d(
-                Isometry2d::from_translation(cur),
-                ui.power_radius as f32 + 0.5,
-                Color::srgb(1.0, 0.8, 0.4),
-            );
+            gizmos.circle_2d(Isometry2d::from_translation(cur), ui.power_radius as f32 + 0.5, Color::srgb(1.0, 0.8, 0.4));
         }
         (Tool::Ignite, _) => {
-            gizmos.circle_2d(
-                Isometry2d::from_translation(cur),
-                3.5,
-                Color::srgb(1.0, 0.5, 0.1),
-            );
+            gizmos.circle_2d(Isometry2d::from_translation(cur), 3.5, Color::srgb(1.0, 0.5, 0.1));
         }
         (_, Some(start)) => {
             let (c, s) = rect_of(TileRect::from_corners(tile_at(start), tile_at(cur)));
@@ -613,10 +524,7 @@ fn draw_tool_preview(
 
 fn quick_save(g: &Game, ui: &mut UiState) {
     match pw_save::save(g, &ui.save_path) {
-        Ok(n) => ui.toast(format!(
-            "Saved ({n} changed chunks) to {}",
-            ui.save_path.display()
-        )),
+        Ok(n) => ui.toast(format!("Saved ({n} changed chunks) to {}", ui.save_path.display())),
         Err(e) => ui.toast(format!("Save failed: {e}")),
     }
 }
@@ -624,11 +532,7 @@ fn quick_save(g: &Game, ui: &mut UiState) {
 fn quick_load(g: &mut Game, ui: &mut UiState) {
     match pw_save::load(g, &ui.save_path) {
         Ok(w) if w.is_empty() => ui.toast("Loaded"),
-        Ok(w) => ui.toast(format!(
-            "Loaded with {} warnings: {}",
-            w.len(),
-            w.join("; ")
-        )),
+        Ok(w) => ui.toast(format!("Loaded with {} warnings: {}", w.len(), w.join("; "))),
         Err(e) => ui.toast(format!("Load failed: {e}")),
     }
 }
@@ -640,13 +544,7 @@ fn new_world(game: &mut Game, seed: u64, ui: &mut UiState) {
         ui.toast(format!("Mod errors: {}", report.errors.join(" | ")));
         return;
     }
-    *game = Game::new(
-        Arc::new(content),
-        scripts,
-        game.ext.clone(),
-        seed,
-        game.mods_dir.clone(),
-    );
+    *game = Game::new(Arc::new(content), scripts, game.ext.clone(), seed, game.mods_dir.clone());
     ui.toast(format!("New world, seed {seed}"));
 }
 
@@ -663,12 +561,7 @@ fn tool_button(ui: &mut egui::Ui, state: &mut UiState, tool: Tool, label: &str) 
 /// Food, rest, warmth and health as coloured bars.
 fn needs_bars(ui: &mut egui::Ui, n: &pw_game::Needs) {
     egui::Grid::new("needs").spacing([8.0, 2.0]).show(ui, |ui| {
-        for (name, v) in [
-            ("Food", n.food),
-            ("Rest", n.rest),
-            ("Warmth", n.warmth),
-            ("Health", n.health),
-        ] {
+        for (name, v) in [("Food", n.food), ("Rest", n.rest), ("Warmth", n.warmth), ("Health", n.health)] {
             let color = if v < 0.2 {
                 egui::Color32::from_rgb(200, 70, 60)
             } else if v < 0.4 {
@@ -677,20 +570,11 @@ fn needs_bars(ui: &mut egui::Ui, n: &pw_game::Needs) {
                 egui::Color32::from_rgb(80, 150, 90)
             };
             ui.label(egui::RichText::new(name).small());
-            ui.add(
-                egui::ProgressBar::new(v)
-                    .desired_width(140.0)
-                    .fill(color)
-                    .text(format!("{:.0}%", v * 100.0)),
-            );
+            ui.add(egui::ProgressBar::new(v).desired_width(140.0).fill(color).text(format!("{:.0}%", v * 100.0)));
             ui.end_row();
         }
     });
-    ui.label(
-        egui::RichText::new(format!("Feels like {:.0} C", n.felt))
-            .small()
-            .weak(),
-    );
+    ui.label(egui::RichText::new(format!("Feels like {:.0} C", n.felt)).small().weak());
 }
 
 /// A small line chart of a history, scaled to its own maximum.
@@ -701,16 +585,10 @@ fn sparkline(ui: &mut egui::Ui, history: &[u32], color: egui::Color32) {
     let pts: Vec<egui::Pos2> = history
         .iter()
         .enumerate()
-        .map(|(i, &v)| {
-            egui::pos2(
-                rect.left() + rect.width() * i as f32 / (n - 1.0),
-                rect.bottom() - rect.height() * v as f32 / max,
-            )
-        })
+        .map(|(i, &v)| egui::pos2(rect.left() + rect.width() * i as f32 / (n - 1.0), rect.bottom() - rect.height() * v as f32 / max))
         .collect();
     if pts.len() > 1 {
-        ui.painter()
-            .add(egui::Shape::line(pts, egui::Stroke::new(1.5, color)));
+        ui.painter().add(egui::Shape::line(pts, egui::Stroke::new(1.5, color)));
     }
 }
 
@@ -812,141 +690,90 @@ fn life_window(ui: &mut egui::Ui, g: &Game) {
     }
     let mut list: Vec<&pw_life::Species> = life.species.iter().collect();
     list.sort_by_key(|s| (s.extinct_tick.is_some(), std::cmp::Reverse(s.alive)));
-    egui::ScrollArea::vertical()
-        .max_height(420.0)
-        .show(ui, |ui| {
-            egui::Grid::new("life_grid")
-                .striped(true)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    for h in [
-                        "Species",
-                        "Alive",
-                        "Trend",
-                        "Born",
-                        "Died (eaten / starved / old / burnt / froze / hunted)",
-                        "Gen",
-                        "Speed",
-                        "Size",
-                        "Cold",
-                        "Fertile",
-                    ] {
-                        ui.label(egui::RichText::new(h).small().strong());
-                    }
-                    ui.end_row();
-                    for s in list {
-                        let name = match s.parent.and_then(|p| life.species_of(p)) {
-                            Some(p) => format!("{}  ← {}", s.name, p.name),
-                            None => s.name.clone(),
-                        };
-                        let text = egui::RichText::new(name);
-                        ui.label(if s.extinct_tick.is_some() {
-                            text.weak().strikethrough()
-                        } else {
-                            text
-                        });
-                        ui.label(s.alive.to_string());
-                        // Population over the last hours.
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(90.0, 18.0), egui::Sense::hover());
-                        let max = s.history.iter().copied().max().unwrap_or(1).max(1) as f32;
-                        let n = s.history.len().max(2) as f32;
-                        let pts: Vec<egui::Pos2> = s
-                            .history
-                            .iter()
-                            .enumerate()
-                            .map(|(i, &v)| {
-                                egui::pos2(
-                                    rect.left() + rect.width() * i as f32 / (n - 1.0),
-                                    rect.bottom() - rect.height() * v as f32 / max,
-                                )
-                            })
-                            .collect();
-                        if pts.len() > 1 {
-                            ui.painter().add(egui::Shape::line(
-                                pts,
-                                egui::Stroke::new(1.5, egui::Color32::from_rgb(120, 200, 140)),
-                            ));
-                        }
-                        ui.label(s.born.to_string());
-                        let c = s.causes;
-                        ui.label(format!(
-                            "{}  ({} / {} / {} / {} / {} / {})",
-                            s.died, c[2], c[0], c[1], c[3], c[4], c[5]
-                        ));
-                        ui.label(s.max_generation.to_string());
-                        match avg.get(&s.id) {
-                            Some((sum, n)) => {
-                                let n = *n as f32;
-                                for k in [
-                                    pw_life::G_SPEED,
-                                    pw_life::G_SIZE,
-                                    pw_life::G_COLD,
-                                    pw_life::G_FERTILITY,
-                                ] {
-                                    ui.label(format!("{:.2}", sum[k] / n));
-                                }
-                            }
-                            None => {
-                                for _ in 0..4 {
-                                    ui.label("-");
-                                }
-                            }
-                        }
-                        ui.end_row();
-                    }
-                });
-        });
-}
-
-/// Colonists x jobs. Click a cell to cycle 1 (first) .. 4 (last) .. off.
-fn work_grid(ui: &mut egui::Ui, g: &mut Game) {
-    ui.label(
-        egui::RichText::new("Click to change: 1 = do first, 4 = do last, blank = never.").weak(),
-    );
-    let content = g.content.clone();
-    let jobs: Vec<usize> = content.jobs_by_priority();
-    egui::Grid::new("work_grid")
-        .striped(true)
-        .spacing([6.0, 4.0])
-        .show(ui, |ui| {
-            ui.label("");
-            for &j in &jobs {
-                let jd = content.jobs.by_idx(j);
-                // Column headers: short label, full label on hover.
-                let short: String = jd
-                    .label
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("")
-                    .chars()
-                    .take(9)
-                    .collect();
-                ui.label(egui::RichText::new(short).small())
-                    .on_hover_text(&jd.label);
+    egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+        egui::Grid::new("life_grid").striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
+            for h in ["Species", "Alive", "Trend", "Born", "Died (eaten / starved / old / burnt / froze / hunted)", "Gen", "Speed", "Size", "Cold", "Fertile"] {
+                ui.label(egui::RichText::new(h).small().strong());
             }
             ui.end_row();
-            for p in &mut g.colony.pawns {
-                ui.label(&p.name);
-                for &j in &jobs {
-                    let id = &content.jobs.by_idx(j).id;
-                    let v = p.work_priority(id);
-                    let (text, color) = match v {
-                        0 => ("  ".to_string(), egui::Color32::GRAY),
-                        1 => ("1".into(), egui::Color32::from_rgb(120, 230, 120)),
-                        2 => ("2".into(), egui::Color32::from_rgb(200, 220, 120)),
-                        3 => ("3".into(), egui::Color32::from_rgb(220, 200, 150)),
-                        n => (n.to_string(), egui::Color32::from_rgb(170, 160, 150)),
-                    };
-                    let b = egui::Button::new(egui::RichText::new(text).color(color).strong())
-                        .min_size(egui::vec2(28.0, 20.0));
-                    if ui.add(b).clicked() {
-                        p.cycle_work(id);
+            for s in list {
+                let name = match s.parent.and_then(|p| life.species_of(p)) {
+                    Some(p) => format!("{}  ← {}", s.name, p.name),
+                    None => s.name.clone(),
+                };
+                let text = egui::RichText::new(name);
+                ui.label(if s.extinct_tick.is_some() { text.weak().strikethrough() } else { text });
+                ui.label(s.alive.to_string());
+                // Population over the last hours.
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(90.0, 18.0), egui::Sense::hover());
+                let max = s.history.iter().copied().max().unwrap_or(1).max(1) as f32;
+                let n = s.history.len().max(2) as f32;
+                let pts: Vec<egui::Pos2> = s
+                    .history
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| egui::pos2(rect.left() + rect.width() * i as f32 / (n - 1.0), rect.bottom() - rect.height() * v as f32 / max))
+                    .collect();
+                if pts.len() > 1 {
+                    ui.painter().add(egui::Shape::line(pts, egui::Stroke::new(1.5, egui::Color32::from_rgb(120, 200, 140))));
+                }
+                ui.label(s.born.to_string());
+                let c = s.causes;
+                ui.label(format!("{}  ({} / {} / {} / {} / {} / {})", s.died, c[2], c[0], c[1], c[3], c[4], c[5]));
+                ui.label(s.max_generation.to_string());
+                match avg.get(&s.id) {
+                    Some((sum, n)) => {
+                        let n = *n as f32;
+                        for k in [pw_life::G_SPEED, pw_life::G_SIZE, pw_life::G_COLD, pw_life::G_FERTILITY] {
+                            ui.label(format!("{:.2}", sum[k] / n));
+                        }
+                    }
+                    None => {
+                        for _ in 0..4 {
+                            ui.label("-");
+                        }
                     }
                 }
                 ui.end_row();
             }
         });
+    });
+}
+
+/// Colonists x jobs. Click a cell to cycle 1 (first) .. 4 (last) .. off.
+fn work_grid(ui: &mut egui::Ui, g: &mut Game) {
+    ui.label(egui::RichText::new("Click to change: 1 = do first, 4 = do last, blank = never.").weak());
+    let content = g.content.clone();
+    let jobs: Vec<usize> = content.jobs_by_priority();
+    egui::Grid::new("work_grid").striped(true).spacing([6.0, 4.0]).show(ui, |ui| {
+        ui.label("");
+        for &j in &jobs {
+            let jd = content.jobs.by_idx(j);
+            // Column headers: short label, full label on hover.
+            let short: String = jd.label.split_whitespace().next().unwrap_or("").chars().take(9).collect();
+            ui.label(egui::RichText::new(short).small()).on_hover_text(&jd.label);
+        }
+        ui.end_row();
+        for p in &mut g.colony.pawns {
+            ui.label(&p.name);
+            for &j in &jobs {
+                let id = &content.jobs.by_idx(j).id;
+                let v = p.work_priority(id);
+                let (text, color) = match v {
+                    0 => ("  ".to_string(), egui::Color32::GRAY),
+                    1 => ("1".into(), egui::Color32::from_rgb(120, 230, 120)),
+                    2 => ("2".into(), egui::Color32::from_rgb(200, 220, 120)),
+                    3 => ("3".into(), egui::Color32::from_rgb(220, 200, 150)),
+                    n => (n.to_string(), egui::Color32::from_rgb(170, 160, 150)),
+                };
+                let b = egui::Button::new(egui::RichText::new(text).color(color).strong()).min_size(egui::vec2(28.0, 20.0));
+                if ui.add(b).clicked() {
+                    p.cycle_work(id);
+                }
+            }
+            ui.end_row();
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -973,40 +800,23 @@ fn ui_panels(
             ui.horizontal(|ui| {
                 let (_, h, m) = g.day_time();
                 let cal = g.calendar();
-                ui.strong(format!(
-                    "{} {}  {h:02}:{m:02}",
-                    g.season_name(),
-                    cal.day_of_season
-                ))
-                .on_hover_text(format!(
-                    "Year {}, day {} of {}",
-                    cal.year,
-                    cal.day_of_season,
-                    g.season_name()
-                ));
+                ui.strong(format!("{} {}  {h:02}:{m:02}", g.season_name(), cal.day_of_season))
+                    .on_hover_text(format!("Year {}, day {} of {}", cal.year, cal.day_of_season, g.season_name()));
                 ui.separator();
                 let env = &g.env;
-                let weather = env
-                    .weather_def(&g.content.climate)
-                    .map(|w| w.name.clone())
-                    .unwrap_or_default();
+                let weather = env.weather_def(&g.content.climate).map(|w| w.name.clone()).unwrap_or_default();
                 // Compass direction the wind blows toward.
                 let arrows = ["E", "NE", "N", "NW", "W", "SW", "S", "SE"];
-                let a = ((env.wind_dir.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU
-                    * 8.0)
-                    .round() as usize)
-                    % 8;
-                ui.label(format!("{:.0}°C {}", env.temp, weather))
-                    .on_hover_text(format!(
-                        "{}. Wind {:.0} km/h {}. Ground wetness {:.0}%, snow {:.0}%.",
-                        pw_game::env::feels(env.temp),
-                        env.wind * 60.0,
-                        arrows[a],
-                        env.wetness * 100.0,
-                        env.snow * 100.0
-                    ));
-                ui.label(format!("Wind {:.0} {}", env.wind * 60.0, arrows[a]))
-                    .on_hover_text("Wind speed (km/h) and the direction it blows toward");
+                let a = ((env.wind_dir.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU * 8.0).round() as usize) % 8;
+                ui.label(format!("{:.0}°C {}", env.temp, weather)).on_hover_text(format!(
+                    "{}. Wind {:.0} km/h {}. Ground wetness {:.0}%, snow {:.0}%.",
+                    pw_game::env::feels(env.temp),
+                    env.wind * 60.0,
+                    arrows[a],
+                    env.wetness * 100.0,
+                    env.snow * 100.0
+                ));
+                ui.label(format!("Wind {:.0} {}", env.wind * 60.0, arrows[a])).on_hover_text("Wind speed (km/h) and the direction it blows toward");
                 ui.separator();
                 for (s, label) in [(0u8, "⏸"), (1, "▶"), (2, "▶▶"), (3, "▶▶▶")] {
                     if ui.selectable_label(clock.speed == s, label).clicked() {
@@ -1030,12 +840,9 @@ fn ui_panels(
                     quick_load(g, st);
                 }
                 ui.separator();
-                ui.checkbox(&mut settings.show_overlay, "Roofs (R)")
-                    .on_hover_text("Show roofs and tree tops");
+                ui.checkbox(&mut settings.show_overlay, "Roofs (R)").on_hover_text("Show roofs and tree tops");
                 ui.checkbox(&mut settings.see_through, "See-through (V)")
-                    .on_hover_text(
-                        "Roofs and tree tops fade around colonists under them and around the mouse",
-                    );
+                    .on_hover_text("Roofs and tree tops fade around colonists under them and around the mouse");
                 if ui.button("?").clicked() {
                     st.show_help = !st.show_help;
                 }
@@ -1049,194 +856,136 @@ fn ui_panels(
         .anchor(egui::Align2::LEFT_TOP, [6.0, 48.0])
         .default_width(190.0)
         .show(&ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .max_height(ctx.content_rect().height() - 120.0)
-                .show(ui, |ui| {
-                    tool_button(ui, st, Tool::Inspect, "🔍 Inspect (Esc)");
-                    ui.collapsing("Orders", |ui| {
-                        let c = g.content.clone();
-                        for (_, j) in c.jobs.iter() {
-                            if j.designatable && j.driver != JobDriver::Plant {
-                                tool_button(ui, st, Tool::Order(j.id.clone()), &j.label);
-                            }
+            egui::ScrollArea::vertical().max_height(ctx.content_rect().height() - 120.0).show(ui, |ui| {
+                tool_button(ui, st, Tool::Inspect, "🔍 Inspect (Esc)");
+                ui.collapsing("Orders", |ui| {
+                    let c = g.content.clone();
+                    for (_, j) in c.jobs.iter() {
+                        if j.designatable && j.driver != JobDriver::Plant {
+                            tool_button(ui, st, Tool::Order(j.id.clone()), &j.label);
                         }
-                        tool_button(ui, st, Tool::Cancel, "✖ Cancel orders");
-                    });
-                    ui.collapsing("Zones", |ui| {
-                        tool_button(ui, st, Tool::Stockpile, "📦 Stockpile");
-                        tool_button(ui, st, Tool::Unzone, "Remove zone");
-                    });
-                    ui.collapsing("Build", |ui| {
-                        let c = g.content.clone();
-                        let mut cats: Vec<String> = c
-                            .protos
-                            .iter()
-                            .filter_map(|p| p.build.as_ref().map(|b| b.category.clone()))
-                            .collect();
-                        cats.sort();
-                        cats.dedup();
-                        for cat in cats {
-                            ui.label(egui::RichText::new(&cat).weak());
-                            for (i, d) in c.objects.iter() {
-                                if let Some(b) = &c.protos[i].build {
-                                    if b.category == cat {
-                                        let cost: Vec<String> = b
-                                            .cost
-                                            .iter()
-                                            .map(|(it, n)| {
-                                                format!("{n} {}", c.items.by_idx(*it).name)
-                                            })
-                                            .collect();
-                                        let r = ui.selectable_label(
-                                            st.tool == Tool::Build(d.id.clone()),
-                                            &d.name,
-                                        );
-                                        if r.clone().on_hover_text(cost.join(", ")).clicked() {
-                                            st.tool = Tool::Build(d.id.clone());
-                                            st.last_build = d.id.clone();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        ui.label(
-                            egui::RichText::new("Walls drag as a room outline. B = last pick")
-                                .weak()
-                                .small(),
-                        );
-                    });
-                    ui.collapsing("Plant", |ui| {
-                        let c = g.content.clone();
+                    }
+                    tool_button(ui, st, Tool::Cancel, "✖ Cancel orders");
+                });
+                ui.collapsing("Zones", |ui| {
+                    tool_button(ui, st, Tool::Stockpile, "📦 Stockpile");
+                    tool_button(ui, st, Tool::Unzone, "Remove zone");
+                });
+                ui.collapsing("Build", |ui| {
+                    let c = g.content.clone();
+                    let mut cats: Vec<String> =
+                        c.protos.iter().filter_map(|p| p.build.as_ref().map(|b| b.category.clone())).collect();
+                    cats.sort();
+                    cats.dedup();
+                    for cat in cats {
+                        ui.label(egui::RichText::new(&cat).weak());
                         for (i, d) in c.objects.iter() {
-                            if c.protos[i].growth.is_some() && c.protos[i].has_tag("plant") {
-                                if ui
-                                    .selectable_label(st.tool == Tool::Plant(d.id.clone()), &d.name)
-                                    .clicked()
-                                {
-                                    st.tool = Tool::Plant(d.id.clone());
-                                    st.last_plant = d.id.clone();
+                            if let Some(b) = &c.protos[i].build {
+                                if b.category == cat {
+                                    let cost: Vec<String> =
+                                        b.cost.iter().map(|(it, n)| format!("{n} {}", c.items.by_idx(*it).name)).collect();
+                                    let r = ui.selectable_label(st.tool == Tool::Build(d.id.clone()), &d.name);
+                                    if r.clone().on_hover_text(cost.join(", ")).clicked() {
+                                        st.tool = Tool::Build(d.id.clone());
+                                        st.last_build = d.id.clone();
+                                    }
                                 }
                             }
                         }
-                    });
-                    ui.collapsing("God powers", |ui| {
-                        let c = g.content.clone();
-                        let mut cats: Vec<String> =
-                            c.powers.iter().map(|(_, p)| p.category.clone()).collect();
-                        cats.dedup();
-                        cats.sort();
-                        cats.dedup();
-                        for cat in cats {
-                            ui.label(egui::RichText::new(&cat).weak());
-                            ui.horizontal_wrapped(|ui| {
-                                for (_, p) in c.powers.iter().filter(|(_, p)| p.category == cat) {
-                                    let on = st.tool == Tool::Power(p.id.clone());
-                                    if ui
-                                        .selectable_label(on, &p.name)
-                                        .on_hover_text(&p.description)
-                                        .clicked()
-                                    {
-                                        st.tool = Tool::Power(p.id.clone());
-                                        st.power_radius = p.radius;
-                                    }
-                                }
-                            });
+                    }
+                    ui.label(egui::RichText::new("Walls drag as a room outline. B = last pick").weak().small());
+                });
+                ui.collapsing("Plant", |ui| {
+                    let c = g.content.clone();
+                    for (i, d) in c.objects.iter() {
+                        if c.protos[i].growth.is_some() && c.protos[i].has_tag("plant") {
+                            if ui.selectable_label(st.tool == Tool::Plant(d.id.clone()), &d.name).clicked() {
+                                st.tool = Tool::Plant(d.id.clone());
+                                st.last_plant = d.id.clone();
+                            }
                         }
-                        ui.add(egui::Slider::new(&mut st.power_radius, 1..=60).text("brush"));
-                        ui.separator();
-                        tool_button(ui, st, Tool::Paint, "🖌 Paint particles");
-                        egui::ComboBox::from_id_salt("paint_mat")
-                            .selected_text(
-                                c.materials
-                                    .get(&st.paint_mat)
-                                    .map(|m| m.name.as_str())
-                                    .unwrap_or("?"),
-                            )
-                            .show_ui(ui, |ui| {
-                                for (_, m) in c.materials.iter() {
-                                    ui.selectable_value(&mut st.paint_mat, m.id.clone(), &m.name);
-                                }
-                            });
-                        egui::ComboBox::from_id_salt("paint_layer")
-                            .selected_text(st.paint_layer.name())
-                            .show_ui(ui, |ui| {
-                                for l in Layer::ALL {
-                                    ui.selectable_value(&mut st.paint_layer, l, l.name());
-                                }
-                            });
-                        ui.add(egui::Slider::new(&mut st.paint_radius, 0..=24).text("radius"));
-                        ui.separator();
-                        egui::ComboBox::from_id_salt("place_def")
-                            .selected_text(
-                                c.objects
-                                    .get(&st.place_def)
-                                    .map(|m| m.name.as_str())
-                                    .unwrap_or("?"),
-                            )
-                            .show_ui(ui, |ui| {
-                                for (_, d) in c.objects.iter() {
-                                    ui.selectable_value(&mut st.place_def, d.id.clone(), &d.name);
-                                }
-                            });
-                        let place = Tool::Place(st.place_def.clone());
-                        tool_button(ui, st, place, "🌳 Place object");
-                        tool_button(ui, st, Tool::Ignite, "🔥 Start fire");
-                        tool_button(ui, st, Tool::SpawnColonist, "🧍 Add colonist");
-                    });
-                    ui.separator();
-                    if ui.button("🎨 Object editor").clicked() {
-                        st.show_editor = !st.show_editor;
                     }
-                    if ui
-                        .button("🛠 Data editor (F2)")
-                        .on_hover_text("See and change how anything in the game is defined")
-                        .clicked()
-                    {
-                        st.show_data = !st.show_data;
-                    }
-                    ui.collapsing("World", |ui| {
-                        ui.checkbox(&mut st.live_reload, "Live reload mods")
-                            .on_hover_text("Pick up changes to mod files while playing");
-                        ui.horizontal(|ui| {
-                            ui.label("Seed");
-                            ui.add(
-                                egui::TextEdit::singleline(&mut st.seed_text).desired_width(90.0),
-                            );
-                            if ui.button("🎲").on_hover_text("Random seed").clicked() {
-                                st.seed_text =
-                                    (time.elapsed().as_nanos() as u64 % 1_000_000_000).to_string();
+                });
+                ui.collapsing("God powers", |ui| {
+                    let c = g.content.clone();
+                    let mut cats: Vec<String> = c.powers.iter().map(|(_, p)| p.category.clone()).collect();
+                    cats.dedup();
+                    cats.sort();
+                    cats.dedup();
+                    for cat in cats {
+                        ui.label(egui::RichText::new(&cat).weak());
+                        ui.horizontal_wrapped(|ui| {
+                            for (_, p) in c.powers.iter().filter(|(_, p)| p.category == cat) {
+                                let on = st.tool == Tool::Power(p.id.clone());
+                                if ui.selectable_label(on, &p.name).on_hover_text(&p.description).clicked() {
+                                    st.tool = Tool::Power(p.id.clone());
+                                    st.power_radius = p.radius;
+                                }
                             }
                         });
-                        if ui
-                            .button("New world")
-                            .on_hover_text("Reloads all mods from disk")
-                            .clicked()
-                        {
-                            let seed = st
-                                .seed_text
-                                .trim()
-                                .parse::<u64>()
-                                .unwrap_or_else(|_| hash_str(st.seed_text.trim()));
-                            new_world(g, seed, st);
-                            if let Ok(mut t) = cam.single_mut() {
-                                let (x, y) = g.spawn_tile().center();
-                                t.translation.x = x;
-                                t.translation.y = y;
+                    }
+                    ui.add(egui::Slider::new(&mut st.power_radius, 1..=60).text("brush"));
+                    ui.separator();
+                    tool_button(ui, st, Tool::Paint, "🖌 Paint particles");
+                    egui::ComboBox::from_id_salt("paint_mat")
+                        .selected_text(c.materials.get(&st.paint_mat).map(|m| m.name.as_str()).unwrap_or("?"))
+                        .show_ui(ui, |ui| {
+                            for (_, m) in c.materials.iter() {
+                                ui.selectable_value(&mut st.paint_mat, m.id.clone(), &m.name);
                             }
+                        });
+                    egui::ComboBox::from_id_salt("paint_layer").selected_text(st.paint_layer.name()).show_ui(ui, |ui| {
+                        for l in Layer::ALL {
+                            ui.selectable_value(&mut st.paint_layer, l, l.name());
                         }
                     });
-                    ui.collapsing("Mods", |ui| {
-                        for m in &g.content.mods {
-                            ui.label(format!("{} {}", m.name, m.version))
-                                .on_hover_text(&m.description);
-                        }
-                        ui.label(
-                            egui::RichText::new("Edit files in assets/mods, then New world")
-                                .weak()
-                                .small(),
-                        );
-                    });
+                    ui.add(egui::Slider::new(&mut st.paint_radius, 0..=24).text("radius"));
+                    ui.separator();
+                    egui::ComboBox::from_id_salt("place_def")
+                        .selected_text(c.objects.get(&st.place_def).map(|m| m.name.as_str()).unwrap_or("?"))
+                        .show_ui(ui, |ui| {
+                            for (_, d) in c.objects.iter() {
+                                ui.selectable_value(&mut st.place_def, d.id.clone(), &d.name);
+                            }
+                        });
+                    let place = Tool::Place(st.place_def.clone());
+                    tool_button(ui, st, place, "🌳 Place object");
+                    tool_button(ui, st, Tool::Ignite, "🔥 Start fire");
+                    tool_button(ui, st, Tool::SpawnColonist, "🧍 Add colonist");
                 });
+                ui.separator();
+                if ui.button("🎨 Object editor").clicked() {
+                    st.show_editor = !st.show_editor;
+                }
+                if ui.button("🛠 Data editor (F2)").on_hover_text("See and change how anything in the game is defined").clicked() {
+                    st.show_data = !st.show_data;
+                }
+                ui.collapsing("World", |ui| {
+                    ui.checkbox(&mut st.live_reload, "Live reload mods").on_hover_text("Pick up changes to mod files while playing");
+                    ui.horizontal(|ui| {
+                        ui.label("Seed");
+                        ui.add(egui::TextEdit::singleline(&mut st.seed_text).desired_width(90.0));
+                        if ui.button("🎲").on_hover_text("Random seed").clicked() {
+                            st.seed_text = (time.elapsed().as_nanos() as u64 % 1_000_000_000).to_string();
+                        }
+                    });
+                    if ui.button("New world").on_hover_text("Reloads all mods from disk").clicked() {
+                        let seed = st.seed_text.trim().parse::<u64>().unwrap_or_else(|_| hash_str(st.seed_text.trim()));
+                        new_world(g, seed, st);
+                        if let Ok(mut t) = cam.single_mut() {
+                            let (x, y) = g.spawn_tile().center();
+                            t.translation.x = x;
+                            t.translation.y = y;
+                        }
+                    }
+                });
+                ui.collapsing("Mods", |ui| {
+                    for m in &g.content.mods {
+                        ui.label(format!("{} {}", m.name, m.version)).on_hover_text(&m.description);
+                    }
+                    ui.label(egui::RichText::new("Edit files in assets/mods, then New world").weak().small());
+                });
+            });
         });
 
     // ---- info
@@ -1268,21 +1017,13 @@ fn ui_panels(
             for p in &g.colony.pawns {
                 ui.horizontal(|ui| {
                     let name = egui::RichText::new(&p.name);
-                    let name = if st.selected == Some(p.id) {
-                        name.strong().underline()
-                    } else {
-                        name
-                    };
+                    let name = if st.selected == Some(p.id) { name.strong().underline() } else { name };
                     if ui.link(name).clicked() {
                         focus = Some((p.id, p.pos));
                     }
                     ui.label(egui::RichText::new(p.activity()).weak());
                     if let Some(w) = p.needs.worst() {
-                        ui.label(
-                            egui::RichText::new(w)
-                                .small()
-                                .color(egui::Color32::from_rgb(230, 120, 90)),
-                        );
+                        ui.label(egui::RichText::new(w).small().color(egui::Color32::from_rgb(230, 120, 90)));
                     }
                 });
             }
@@ -1293,28 +1034,18 @@ fn ui_panels(
                     t.translation.y = pos.1;
                 }
             }
-            if let Some(p) = st
-                .selected
-                .and_then(|id| g.colony.pawns.iter().find(|p| p.id == id))
-            {
+            if let Some(p) = st.selected.and_then(|id| g.colony.pawns.iter().find(|p| p.id == id)) {
                 ui.separator();
                 ui.strong(&p.name);
                 ui.label(format!("Doing: {}", p.activity()));
                 if let Some((item, n)) = p.carrying {
-                    ui.label(format!(
-                        "Carrying: {n} {}",
-                        g.content.items.by_idx(item).name
-                    ));
+                    ui.label(format!("Carrying: {n} {}", g.content.items.by_idx(item).name));
                 }
                 if g.content.creatures.by_idx(p.creature).needs.is_some() {
                     needs_bars(ui, &p.needs);
                 }
                 ui.horizontal(|ui| {
-                    let label = if st.follow {
-                        "Stop following (F)"
-                    } else {
-                        "Follow (F)"
-                    };
+                    let label = if st.follow { "Stop following (F)" } else { "Follow (F)" };
                     if ui.button(label).clicked() {
                         st.follow = !st.follow;
                     }
@@ -1358,9 +1089,7 @@ fn ui_panels(
     if st.tool == Tool::Inspect && !ctx.is_pointer_over_egui() {
         if let (Some(cur), Some(at)) = (st.cursor, ctx.pointer_hover_pos()) {
             let mut lines: Vec<String> = Vec::new();
-            if let Some(p) =
-                pawn_at(g, cur, 6.0).and_then(|id| g.colony.pawns.iter().find(|p| p.id == id))
-            {
+            if let Some(p) = pawn_at(g, cur, 6.0).and_then(|id| g.colony.pawns.iter().find(|p| p.id == id)) {
                 lines.push(format!("{} - {}", p.name, p.activity()));
                 if g.content.creatures.by_idx(p.creature).needs.is_some() {
                     let n = &p.needs;
@@ -1378,11 +1107,7 @@ fn ui_panels(
                 lines.push(format!("Their values: {}", t.values().join(", ")));
             }
             if let Some(c) = g.life.at((cur.x, cur.y), 6.0) {
-                let sp = g
-                    .life
-                    .species_of(c.species)
-                    .map(|s| s.name.clone())
-                    .unwrap_or_default();
+                let sp = g.life.species_of(c.species).map(|s| s.name.clone()).unwrap_or_default();
                 lines.push(format!("{sp} - {}", c.activity()));
                 lines.push(format!(
                     "{:.1} days old, generation {}, {} young, {} kills",
@@ -1392,32 +1117,15 @@ fn ui_panels(
                     c.kills
                 ));
                 // Its most unusual genes, and what it has learned to favour.
-                let mut genes: Vec<(usize, f32)> =
-                    (0..pw_life::GENES).map(|k| (k, c.genes[k])).collect();
+                let mut genes: Vec<(usize, f32)> = (0..pw_life::GENES).map(|k| (k, c.genes[k])).collect();
                 genes.sort_by(|a, b| (b.1 - 1.0).abs().total_cmp(&(a.1 - 1.0).abs()));
-                let gtxt: Vec<String> = genes
-                    .iter()
-                    .take(3)
-                    .map(|(k, v)| format!("{} {:.2}", pw_life::GENE_NAMES[*k], v))
-                    .collect();
+                let gtxt: Vec<String> = genes.iter().take(3).map(|(k, v)| format!("{} {:.2}", pw_life::GENE_NAMES[*k], v)).collect();
                 lines.push(format!("Genes: {}", gtxt.join(", ")));
-                let (best, _) = c
-                    .brain
-                    .iter()
-                    .enumerate()
-                    .fold((0, f32::MIN), |b, (i, &w)| if w > b.1 { (i, w) } else { b });
-                lines.push(format!(
-                    "Has learned to favour: {}",
-                    pw_life::ACTION_NAMES[best].to_lowercase()
-                ));
+                let (best, _) = c.brain.iter().enumerate().fold((0, f32::MIN), |b, (i, &w)| if w > b.1 { (i, w) } else { b });
+                lines.push(format!("Has learned to favour: {}", pw_life::ACTION_NAMES[best].to_lowercase()));
             }
             // First describe line is the coordinates; skip it.
-            lines.extend(
-                g.describe(cur.x.floor() as i32, cur.y.floor() as i32)
-                    .into_iter()
-                    .skip(1)
-                    .take(3),
-            );
+            lines.extend(g.describe(cur.x.floor() as i32, cur.y.floor() as i32).into_iter().skip(1).take(3));
             if !lines.is_empty() {
                 egui::Area::new(egui::Id::new("hover_tip"))
                     .order(egui::Order::Tooltip)
@@ -1456,12 +1164,9 @@ fn ui_panels(
     if st.show_data {
         let mut open = true;
         let mut msg = None;
-        egui::Window::new("Data editor")
-            .open(&mut open)
-            .default_pos([240.0, 70.0])
-            .show(&ctx, |ui| {
-                msg = st.data.ui(ui, g);
-            });
+        egui::Window::new("Data editor").open(&mut open).default_pos([240.0, 70.0]).show(&ctx, |ui| {
+            msg = st.data.ui(ui, g);
+        });
         if let Some(m) = msg {
             st.toast(m);
         }
@@ -1470,21 +1175,14 @@ fn ui_panels(
 
     if st.show_life {
         let mut open = true;
-        egui::Window::new("Life")
-            .open(&mut open)
-            .default_pos([260.0, 140.0])
-            .show(&ctx, |ui| life_window(ui, g));
+        egui::Window::new("Life").open(&mut open).default_pos([260.0, 140.0]).show(&ctx, |ui| life_window(ui, g));
         st.show_life = open;
     }
 
     if st.show_tribes {
         let mut open = true;
         let mut goto = None;
-        egui::Window::new("Tribes")
-            .open(&mut open)
-            .default_pos([300.0, 120.0])
-            .default_width(420.0)
-            .show(&ctx, |ui| tribes_window(ui, g, &mut goto));
+        egui::Window::new("Tribes").open(&mut open).default_pos([300.0, 120.0]).default_width(420.0).show(&ctx, |ui| tribes_window(ui, g, &mut goto));
         st.show_tribes = open;
         if goto.is_some() {
             st.goto = goto;
@@ -1493,27 +1191,20 @@ fn ui_panels(
 
     if st.show_work {
         let mut open = true;
-        egui::Window::new("Work priorities")
-            .open(&mut open)
-            .resizable(false)
-            .default_pos([260.0, 120.0])
-            .show(&ctx, |ui| {
-                work_grid(ui, g);
-            });
+        egui::Window::new("Work priorities").open(&mut open).resizable(false).default_pos([260.0, 120.0]).show(&ctx, |ui| {
+            work_grid(ui, g);
+        });
         st.show_work = open;
     }
 
     if st.show_editor {
         let mut open = true;
         let mut place: Option<String> = None;
-        egui::Window::new("Object editor")
-            .open(&mut open)
-            .default_pos([260.0, 80.0])
-            .show(&ctx, |ui| {
-                if let Some(id) = st.editor.ui(ui, g) {
-                    place = Some(id);
-                }
-            });
+        egui::Window::new("Object editor").open(&mut open).default_pos([260.0, 80.0]).show(&ctx, |ui| {
+            if let Some(id) = st.editor.ui(ui, g) {
+                place = Some(id);
+            }
+        });
         if let Some(id) = place {
             st.place_def = id.clone();
             st.tool = Tool::Place(id);

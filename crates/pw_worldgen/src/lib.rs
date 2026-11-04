@@ -83,11 +83,7 @@ impl Generator {
     }
 
     pub fn biome_for(content: &Content, e: f32, m: f32, t: f32) -> usize {
-        content
-            .biome_rt
-            .iter()
-            .position(|b| b.matches(e, m, t))
-            .unwrap_or(content.biome_rt.len().saturating_sub(1))
+        content.biome_rt.iter().position(|b| b.matches(e, m, t)).unwrap_or(content.biome_rt.len().saturating_sub(1))
     }
 
     /// Biome at a particle. Climate is nudged by small-scale noise so borders
@@ -111,11 +107,7 @@ impl Generator {
         let b = &content.biome_rt[bi];
         let floor = b.floor_at(self.detail_at(x, y));
         let solid = b.solid.unwrap_or(NONE_MAT);
-        Terrain {
-            biome: bi,
-            floor,
-            solid,
-        }
+        Terrain { biome: bi, floor, solid }
     }
 
     /// Generate one chunk with its natural objects.
@@ -144,17 +136,9 @@ impl Generator {
         for ly in 0..CHUNK {
             for lx in 0..CHUNK {
                 let (gx, gy) = (lx / COARSE, ly / COARSE);
-                let (fx, fy) = (
-                    (lx % COARSE) as f32 / COARSE as f32,
-                    (ly % COARSE) as f32 / COARSE as f32,
-                );
+                let (fx, fy) = ((lx % COARSE) as f32 / COARSE as f32, (ly % COARSE) as f32 / COARSE as f32);
                 let at = |x: i32, y: i32| clim[(y * n + x) as usize];
-                let (a, b, c, d) = (
-                    at(gx, gy),
-                    at(gx + 1, gy),
-                    at(gx, gy + 1),
-                    at(gx + 1, gy + 1),
-                );
+                let (a, b, c, d) = (at(gx, gy), at(gx + 1, gy), at(gx, gy + 1), at(gx + 1, gy + 1));
                 let lerp = |p: f32, q: f32, r: f32, s: f32| {
                     let top = p + (q - p) * fx;
                     let bot = r + (s - r) * fx;
@@ -187,12 +171,7 @@ impl Generator {
     }
 
     /// Find every natural object whose shape can touch this chunk and stamp the part inside it.
-    fn place_natural(
-        &self,
-        content: &Content,
-        cp: ChunkPos,
-        chunk: &mut Chunk,
-    ) -> Vec<NaturalObject> {
+    fn place_natural(&self, content: &Content, cp: ChunkPos, chunk: &mut Chunk) -> Vec<NaturalObject> {
         let (ox, oy) = cp.origin();
         let (min_x, min_y) = (ox - OBJECT_MARGIN, oy - OBJECT_MARGIN);
         let (max_x, max_y) = (ox + CHUNK + OBJECT_MARGIN, oy + CHUNK + OBJECT_MARGIN);
@@ -219,11 +198,7 @@ impl Generator {
                             Anchor::Center => (px as i32, py as i32),
                             Anchor::Tile => TilePos::new(tx, ty).origin(),
                         };
-                        if origin.0 < min_x
-                            || origin.0 >= max_x
-                            || origin.1 < min_y
-                            || origin.1 >= max_y
-                        {
+                        if origin.0 < min_x || origin.0 >= max_x || origin.1 < min_y || origin.1 >= max_y {
                             continue;
                         }
                         let ter = self.terrain_at(content, origin.0, origin.1);
@@ -233,12 +208,7 @@ impl Generator {
                         {
                             continue;
                         }
-                        cands.push(NaturalObject {
-                            key: h,
-                            def: rule.object,
-                            origin,
-                            seed: hash2(h, 7, 7),
-                        });
+                        cands.push(NaturalObject { key: h, def: rule.object, origin, seed: hash2(h, 7, 7) });
                     }
                 }
             }
@@ -298,11 +268,7 @@ impl GenPool {
                 }
             });
         }
-        Self {
-            tx,
-            rx: Mutex::new(rx),
-            pending: HashSet::new(),
-        }
+        Self { tx, rx: Mutex::new(rx), pending: HashSet::new() }
     }
 
     pub fn request(&mut self, cp: ChunkPos, seed: u64, content: Arc<Content>) {

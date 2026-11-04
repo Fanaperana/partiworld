@@ -104,14 +104,7 @@ pub fn calendar(c: &ClimateDef, tick: u64) -> Calendar {
 
 pub fn season_now(c: &ClimateDef, tick: u64) -> SeasonNow {
     if c.seasons.is_empty() {
-        return SeasonNow {
-            temp: 15.0,
-            swing: 5.0,
-            sunrise: 6.0,
-            sunset: 19.0,
-            growth: 1.0,
-            ..Default::default()
-        };
+        return SeasonNow { temp: 15.0, swing: 5.0, sunrise: 6.0, sunset: 19.0, growth: 1.0, ..Default::default() };
     }
     let n = c.seasons.len();
     let pos = tick as f64 / DAY_TICKS as f64 / c.days_per_season.max(1) as f64;
@@ -134,13 +127,12 @@ pub fn season_now(c: &ClimateDef, tick: u64) -> SeasonNow {
 pub fn light(c: &ClimateDef, tick: u64, clouds: f32) -> Light {
     let s = season_now(c, tick);
     let h = calendar(c, tick).hour;
-    let day =
-        ramp(s.sunrise - 1.0, s.sunrise + 0.7, h) * (1.0 - ramp(s.sunset - 0.7, s.sunset + 1.0, h));
+    let day = ramp(s.sunrise - 1.0, s.sunrise + 0.7, h) * (1.0 - ramp(s.sunset - 0.7, s.sunset + 1.0, h));
     let near = |x: f32| (1.0 - (h - x).abs() / 1.3).max(0.0);
     let (dw, dk) = (near(s.sunrise), near(s.sunset));
     Light {
         // Heavy cloud makes the day a bit dimmer too.
-        dark: (1.0 - day).max(clouds * 0.25),
+        dark: (1.0 - day) .max(clouds * 0.25),
         warm: dw.max(dk) * (1.0 - clouds * 0.7),
         dawn: dw >= dk,
     }
@@ -175,10 +167,7 @@ impl Env {
 
     /// Wind as a vector (toward which it blows) scaled by strength.
     pub fn wind_vec(&self) -> (f32, f32) {
-        (
-            self.wind_dir.cos() * self.wind,
-            self.wind_dir.sin() * self.wind,
-        )
+        (self.wind_dir.cos() * self.wind, self.wind_dir.sin() * self.wind)
     }
 
     /// How fast plants grow now: the season's rate, slowed by cold.
@@ -193,9 +182,7 @@ impl Env {
 
     fn pick_weather(&mut self, c: &ClimateDef, tick: u64, rng: &mut Rng) {
         let cal = calendar(c, tick);
-        let Some(season) = c.seasons.get(cal.season) else {
-            return;
-        };
+        let Some(season) = c.seasons.get(cal.season) else { return };
         let options: Vec<(&WeatherDef, f32)> = c
             .weather
             .iter()
@@ -203,9 +190,7 @@ impl Env {
             .filter(|x| x.1 > 0.0)
             .collect();
         let total: f32 = options.iter().map(|o| o.1).sum();
-        let Some(mut chosen) = options.first().map(|o| o.0) else {
-            return;
-        };
+        let Some(mut chosen) = options.first().map(|o| o.0) else { return };
         let mut r = rng.f32() * total;
         for (w, k) in &options {
             if r < *k {
@@ -227,9 +212,7 @@ impl Env {
             self.pick_weather(c, tick, rng);
         }
         let w = self.weather_def(c).cloned();
-        let (p, cl, fg, wt) = w
-            .map(|w| (w.precipitation, w.clouds, w.fog, w.temp))
-            .unwrap_or_default();
+        let (p, cl, fg, wt) = w.map(|w| (w.precipitation, w.clouds, w.fog, w.temp)).unwrap_or_default();
         // Ease toward the weather over roughly an hour.
         let k = 1.0 / HOUR_TICKS as f32;
         let ease = |v: &mut f32, target: f32| *v += (target - *v) * (k * 3.0).min(1.0);
@@ -246,8 +229,7 @@ impl Env {
         let h = calendar(c, tick).hour;
         // Coldest around 3:00, warmest around 15:00.
         let daily = ((h - 15.0) / 24.0 * std::f32::consts::TAU).cos();
-        let target =
-            s.temp + s.swing * daily + wt * self.precip.max(self.clouds).max(0.3) + self.biome_temp;
+        let target = s.temp + s.swing * daily + wt * self.precip.max(self.clouds).max(0.3) + self.biome_temp;
         ease(&mut self.temp, target);
 
         // Ground: rain soaks it, sun and wind dry it; snow piles up below freezing, melts above.
@@ -260,9 +242,7 @@ impl Env {
         if self.snowing() {
             self.snow = (self.snow + self.precip * k / 5.0).min(1.0);
         } else if self.temp > 0.5 {
-            self.snow =
-                (self.snow - self.temp * k / 30.0 - if self.raining() { k / 3.0 } else { 0.0 })
-                    .max(0.0);
+            self.snow = (self.snow - self.temp * k / 30.0 - if self.raining() { k / 3.0 } else { 0.0 }).max(0.0);
         }
     }
 }
