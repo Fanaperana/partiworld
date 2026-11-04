@@ -303,7 +303,8 @@ fn saplings_grow() {
     let (x, y) = t.center();
     assert!(g.place_object("core:berry_sprout", x as i32, y as i32));
     let bush = c.objects.idx("core:berry_bush").unwrap();
-    let ok = run(&mut g, 2400 + 200, |g| g.world.objects.instances.values().any(|i| i.def == bush && i.origin == (x as i32, y as i32)));
+    // Growth speed depends on season and temperature, so allow some slack.
+    let ok = run(&mut g, 2400 * 3, |g| g.world.objects.instances.values().any(|i| i.def == bush && i.origin == (x as i32, y as i32)));
     assert!(ok, "sprout did not grow");
 }
 
@@ -336,15 +337,135 @@ fn bench_busy_colony() {
     }
     g.load_chunks_now(ChunkPos::new(-3, -3), ChunkPos::new(3, 3));
     let big = TileRect::from_corners(home.offset(-60, -60), home.offset(60, 60));
+    let t0 = std::time::Instant::now();
     g.designate("core:chop", big, None);
     g.designate("core:harvest", big, None);
     g.designate("core:quarry", big, None);
+    println!("BENCH designate {} orders in {:.1} ms", g.colony.designations.len(), t0.elapsed().as_secs_f64() * 1000.0);
     g.stockpile(TileRect::from_corners(home.offset(-8, -8), home.offset(-3, -3)), true);
     g.build("core:wall_wood", TileRect::from_corners(home.offset(4, 4), home.offset(12, 12)));
     let t = std::time::Instant::now();
+    let mut worst = 0f64;
     for _ in 0..3000 {
+        let s = std::time::Instant::now();
         g.step();
+        worst = worst.max(s.elapsed().as_secs_f64() * 1000.0);
     }
+    println!("BENCH worst tick {worst:.2} ms");
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("BENCH {:.3} ms/tick, {} designations left, {} blueprints left", ms / 3000.0, g.colony.designations.len(), g.colony.blueprints.len());
+}
+
+fn clear_area(g: &mut Game, a: TilePos, b: TilePos) {
+    let c = g.content.clone();
+    for t in TileRect::from_corners(a, b).iter() {
+        for o in g.world.objects_in_tile(t) {
+            pw_objects::destroy(&mut g.world, &c, o);
+        }
+    }
+    g.world.rebuild_tiles(&c);
+}
+
+#[test]
+fn roofs_need_support_and_collapse_without_it() {
+    let mut g = new_game(9);
+    let home = g.spawn_tile();
+    clear_area(&mut g, home.offset(-2, -2), home.offset(14, 14));
+    // Out in the open: no wall or rock nearby.
+    let t = home.offset(10, 10);
+    assert_eq!(g.build("core:roof_thatch", TileRect::from_corners(t, t)), 0);
+    assert!(g.last_build_error.as_deref().unwrap_or("").contains("wall"), "{:?}", g.last_build_error);
+
+    // A finished wall makes roofs nearby possible.
+    let c = g.content.clone();
+    let wall = c.objects.idx("core:wall_wood").unwrap();
+    let wt = home.offset(4, 4);
+    let wall_id = pw_objects::place(&mut g.world, &c, wall, wt.origin(), 1, true);
+    g.world.rebuild_tiles(&c);
+    let rt = home.offset(6, 4);
+    assert_eq!(g.build("core:roof_thatch", TileRect::from_corners(rt, rt)), 1);
+    // ...and a roof placed straight away stays up.
+    let roof = c.objects.idx("core:roof_thatch").unwrap();
+    let rt2 = home.offset(7, 4);
+    let roof_id = pw_objects::place(&mut g.world, &c, roof, rt2.origin(), 1, true);
+    run(&mut g, 90, |_| false);
+    assert!(g.world.objects.get(roof_id).is_some(), "supported roof fell");
+
+    // Knock the wall down: the roof falls in.
+    pw_objects::destroy(&mut g.world, &c, wall_id);
+    g.world.rebuild_tiles(&c);
+    let fell = run(&mut g, 90, |g| g.world.objects.get(roof_id).is_none());
+    assert!(fell, "roof without support did not collapse");
+    assert!(g.log.iter().any(|m| m.contains("collapsed")));
+}
+
+#[test]
+fn seasons_and_weather_change() {
+    let mut g = new_game(4);
+    let climate = g.content.climate.clone();
+    let year = DAY_TICKS * climate.days_per_season as u64 * climate.seasons.len() as u64;
+    let mut seasons = std::collections::BTreeSet::new();
+    let mut weathers = std::collections::BTreeSet::new();
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    // Step the climate alone through a whole year (fast).
+    let mut rng = Rng::new(1);
+    let mut env = g.env.clone();
+    for tick in (0..year).step_by(30) {
+        for k in 0..30 {
+            env.tick(&climate, tick + k, &mut rng);
+        }
+        seasons.insert(pw_game::env::calendar(&climate, tick).season);
+        weathers.insert(env.weather.clone());
+        lo = lo.min(env.temp);
+        hi = hi.max(env.temp);
+    }
+    assert_eq!(seasons.len(), climate.seasons.len());
+    assert!(weathers.len() >= 4, "{weathers:?}");
+    assert!(lo < 0.0 && hi > 15.0, "temperature range {lo}..{hi}");
+    // Nights are darker than noon.
+    g.tick = DAY_TICKS / 4; // 12:00
+    let noon = g.light().dark;
+    g.tick = DAY_TICKS * 3 / 4; // 00:00
+    assert!(g.light().dark > noon + 0.5);
+}
+
+/// Burn a field of dry grass and return (cells burnt, mean x of burnt cells).
+fn burn_field(wet: f32, wind: (f32, f32)) -> (usize, f32) {
+    let c = new_game(1).content.clone();
+    let mut w = pw_world::World::new(1);
+    let grass = c.mat("core:dry_grass").unwrap();
+    let ash = c.mat("core:ash").unwrap();
+    let mut ch = pw_world::Chunk::new(ChunkPos::new(0, 0));
+    ch.mat[0].iter_mut().for_each(|m| *m = grass);
+    w.insert_chunk(ch);
+    let fire = c.mat("core:fire").unwrap();
+    for dy in -2..=2 {
+        for dx in -2..=2 {
+            w.set(&c, 128 + dx, 128 + dy, Layer::Floor, fire, pw_world::NO_OBJ);
+        }
+    }
+    let mut rng = Rng::new(7);
+    let env = pw_sim::SimEnv { wet, wind, temp: 15.0 };
+    for _ in 0..400 {
+        pw_sim::tick(&mut w, &c, &mut rng, &Default::default(), &env);
+    }
+    let ch = &w.chunks[&ChunkPos::new(0, 0)];
+    let (mut n, mut sx) = (0usize, 0f32);
+    for (i, &m) in ch.mat[0].iter().enumerate() {
+        if m == ash || m == fire {
+            n += 1;
+            sx += (i % 256) as f32;
+        }
+    }
+    (n, if n > 0 { sx / n as f32 } else { 128.0 })
+}
+
+#[test]
+fn rain_slows_fire_and_wind_pushes_it() {
+    let (dry, _) = burn_field(0.0, (0.0, 0.0));
+    let (wet, _) = burn_field(1.0, (0.0, 0.0));
+    assert!(wet * 3 < dry, "rain should slow fire: dry {dry}, wet {wet}");
+    let (_, east) = burn_field(0.0, (0.9, 0.0));
+    let (_, west) = burn_field(0.0, (-0.9, 0.0));
+    assert!(east > 128.0 + 4.0 && west < 128.0 - 4.0, "wind should push fire: east {east}, west {west}");
 }

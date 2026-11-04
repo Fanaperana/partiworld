@@ -4938,6 +4938,7 @@ name = "pw_render"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "pw_colony",
  "pw_core",
  "pw_game",
  "pw_world",

@@ -33,6 +33,14 @@ pub struct MaterialRt {
     /// (item index, particles per item)
     pub yields: Option<(usize, u32)>,
     pub tags: Vec<String>,
+    /// Holds roofs up (tag `support`).
+    pub support: bool,
+    /// Tree leaves (tag `leaves`), and whether they stay in winter (`evergreen`).
+    pub leaves: bool,
+    pub evergreen: bool,
+    /// Tags `roof` and `water`, used for snow and ice.
+    pub roof: bool,
+    pub water: bool,
 }
 
 impl MaterialRt {
@@ -85,6 +93,10 @@ pub struct ObjectProto {
     pub hooks: BTreeMap<String, String>,
     /// True if the shape puts anything in the solid layer that blocks.
     pub blocks: bool,
+    /// Roofs: max distance (tiles) to a support; 0 = none needed.
+    pub needs_support: u32,
+    /// True if the shape has solid particles tagged `support` (walls).
+    pub gives_support: bool,
 }
 
 impl ObjectProto {
@@ -221,6 +233,9 @@ pub struct ReactionRt {
     pub neighbor: Option<(Layer, Vec<bool>, bool)>,
     pub chance: f32,
     pub effects: Vec<EffectRt>,
+    pub wet: f32,
+    pub windy: bool,
+    pub temp: (f32, f32),
 }
 
 /// Reactions grouped by (mode, layer, input material) for fast lookup.
@@ -319,6 +334,7 @@ pub struct Content {
     pub jobs: Registry<JobDef>,
     pub creatures: Registry<CreatureDef>,
     pub worldgen: WorldGenDef,
+    pub climate: ClimateDef,
 
     // Compiled by `link()`.
     pub mats: Vec<MaterialRt>,
@@ -362,6 +378,7 @@ impl Content {
             jobs: Registry::new(),
             creatures: Registry::new(),
             worldgen: WorldGenDef::default(),
+            climate: ClimateDef::default(),
             mats: Vec::new(),
             item_rt: Vec::new(),
             protos: Vec::new(),
@@ -436,6 +453,11 @@ impl Content {
                     hardness: d.hardness.max(0.05),
                     yields,
                     tags: d.tags.clone(),
+                    support: d.tags.iter().any(|t| t == "support"),
+                    leaves: d.tags.iter().any(|t| t == "leaves"),
+                    evergreen: d.tags.iter().any(|t| t == "evergreen"),
+                    roof: d.tags.iter().any(|t| t == "roof"),
+                    water: d.tags.iter().any(|t| t == "water"),
                 }
             })
             .collect();
@@ -560,6 +582,8 @@ impl Content {
                 regrow,
                 hooks: d.hooks.clone(),
                 blocks: false,
+                needs_support: d.needs_support,
+                gives_support: false,
             });
         }
         // Growth targets need every object registered.
@@ -572,10 +596,10 @@ impl Content {
             }
         }
         for p in &mut protos {
-            p.blocks = p
-                .cells(0)
-                .iter()
-                .any(|c| c.layer == Layer::Solid && self.mats.get(c.mat as usize).is_some_and(|m| m.blocks));
+            let cells = p.cells(0);
+            p.blocks = cells.iter().any(|c| c.layer == Layer::Solid && self.mats.get(c.mat as usize).is_some_and(|m| m.blocks));
+            p.gives_support =
+                cells.iter().any(|c| c.layer == Layer::Solid && self.mats.get(c.mat as usize).is_some_and(|m| m.blocks && m.support));
         }
         self.protos = protos;
 
@@ -649,7 +673,15 @@ impl Content {
                 .map(|e| EffectRt { target: e.target, layer: e.layer, mat: mat_ref(&e.set, &ctx, &mut errs) })
                 .collect();
             let idx = rx.list.len();
-            rx.list.push(ReactionRt { layer: d.layer, neighbor, chance: d.chance, effects });
+            rx.list.push(ReactionRt {
+                layer: d.layer,
+                neighbor,
+                chance: d.chance,
+                effects,
+                wet: d.wet.max(0.0),
+                windy: d.windy,
+                temp: (d.min_temp.unwrap_or(f32::MIN), d.max_temp.unwrap_or(f32::MAX)),
+            });
             let table = match d.mode {
                 ReactionMode::Active => &mut rx.active,
                 ReactionMode::Random => &mut rx.random,

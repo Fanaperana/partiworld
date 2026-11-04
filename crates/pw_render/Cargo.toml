@@ -7,4 +7,5 @@ edition.workspace = true
 pw_core.workspace = true
 pw_world.workspace = true
 pw_game.workspace = true
+pw_colony.workspace = true
 bevy.workspace = true

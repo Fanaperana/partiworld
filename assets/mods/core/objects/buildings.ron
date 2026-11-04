@@ -88,6 +88,8 @@
         name: "Thatch roof",
         tags: ["roof", "flammable"],
         anchor: Tile,
+        // Must be within 6 tiles of a wall or rock, or it can't be built / falls down.
+        needs_support: 6,
         shape: Pattern(
             palette: {'T': "core:thatch"},
             layers: [PatternLayer(layer: Overlay, rows: [

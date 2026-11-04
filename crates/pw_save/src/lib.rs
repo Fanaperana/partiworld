@@ -11,7 +11,7 @@ use pw_game::Game;
 use pw_world::*;
 use serde::{Deserialize, Serialize};
 
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct Tables {
@@ -33,6 +33,7 @@ struct SaveFile {
     chunks: Vec<(ChunkPos, Vec<u8>)>,
     objects: ObjectStore,
     colony: Colony,
+    env: pw_game::Env,
 }
 
 pub fn save(game: &Game, path: &Path) -> Result<usize, String> {
@@ -61,6 +62,7 @@ pub fn save(game: &Game, path: &Path) -> Result<usize, String> {
         chunks,
         objects: game.world.objects.clone(),
         colony: game.colony.clone(),
+        env: game.env.clone(),
     };
     let bytes = bincode::serialize(&file).map_err(|e| e.to_string())?;
     if let Some(dir) = path.parent() {
@@ -189,5 +191,6 @@ pub fn load(game: &mut Game, path: &Path) -> Result<Vec<String>, String> {
     colony.after_load();
 
     game.replace_state(world, colony, file.seed, file.tick, file.rng);
+    game.env = file.env;
     Ok(warnings)
 }

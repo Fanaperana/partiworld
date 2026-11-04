@@ -2,6 +2,6 @@ WorldGenDef(
     elevation_frequency: 0.0012,
     moisture_frequency: 0.0009,
     temperature_frequency: 0.0005,
-    detail_frequency: 0.06,
+    detail_frequency: 0.022,
     warp: 40.0,
 )

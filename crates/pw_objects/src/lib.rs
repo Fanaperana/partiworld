@@ -136,6 +136,39 @@ pub fn has_yield(world: &World, content: &Content, id: ObjId) -> bool {
     live_cells(world, id).iter().any(|&(x, y, l)| content.mat_rt(world.get(x, y, l)).yields.is_some())
 }
 
+/// Is there a support (wall or rock tile) within `range` tiles of `t`?
+pub fn roof_supported(world: &World, t: TilePos, range: u32) -> bool {
+    let r = range as i32;
+    for dy in -r..=r {
+        for dx in -r..=r {
+            if dx * dx + dy * dy <= r * r && world.tile(t.offset(dx, dy)).is_some_and(|i| i.support) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Built roofs that have lost their support. Each is (id, def, tile).
+pub fn unsupported_roofs(world: &World, content: &Content) -> Vec<(ObjId, usize, TilePos)> {
+    world
+        .objects
+        .instances
+        .values()
+        .filter(|i| i.built && content.protos[i.def].needs_support > 0)
+        .filter_map(|i| {
+            let t = i.origin_tile();
+            // Only judge roofs whose surroundings are loaded.
+            let r = content.protos[i.def].needs_support as i32;
+            let loaded = [(-r, -r), (r, -r), (-r, r), (r, r)].iter().all(|&(dx, dy)| {
+                let (x, y) = t.offset(dx, dy).origin();
+                world.is_loaded(x, y)
+            });
+            (loaded && !roof_supported(world, t, content.protos[i.def].needs_support)).then_some((i.id, i.def, t))
+        })
+        .collect()
+}
+
 /// Centre of an object's bounds.
 pub fn center(inst: &ObjectInstance) -> (i32, i32) {
     ((inst.min.0 + inst.max.0) / 2, (inst.min.1 + inst.max.1) / 2)
@@ -174,7 +207,8 @@ pub fn process_damage(world: &mut World, content: &Content) -> Vec<ObjectEvent> 
 
 /// Slow object life: growth into the next stage and regrowing yield particles.
 /// Runs on a slice of objects each tick so cost stays flat.
-pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng) -> Vec<ObjectEvent> {
+/// `growth` scales how fast plants grow and regrow (season and temperature; 0 = paused).
+pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng, growth: f32) -> Vec<ObjectEvent> {
     const EVERY: u64 = 30;
     let mut out = Vec::new();
     let ids: Vec<ObjId> = world
@@ -186,7 +220,13 @@ pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng)
         .collect();
     for id in ids {
         let Some(inst) = world.objects.instances.get_mut(&id) else { continue };
-        inst.age = inst.age.saturating_add(EVERY as u32);
+        // Built things do not grow; plants age at the season's pace.
+        if !inst.built {
+            let step = EVERY as f32 * growth.max(0.0);
+            let whole = step.floor();
+            let extra = if rng.chance(step - whole) { 1 } else { 0 };
+            inst.age = inst.age.saturating_add(whole as u32 + extra);
+        }
         let (def, age, origin, seed) = (inst.def, inst.age, inst.origin, inst.seed);
         if !world.is_loaded(origin.0, origin.1) {
             continue;
@@ -209,7 +249,7 @@ pub fn tick_life(world: &mut World, content: &Content, tick: u64, rng: &mut Rng)
             if (tick / EVERY) % (rg.interval as u64 / EVERY).max(1) == 0 {
                 let cells = proto.cells(seed);
                 for (x, y, c) in world_cells(origin, &cells) {
-                    if rg.mats.contains(&c.mat) && world.get(x, y, c.layer) == NONE_MAT && rng.chance(rg.chance) {
+                    if rg.mats.contains(&c.mat) && world.get(x, y, c.layer) == NONE_MAT && rng.chance(rg.chance * growth.min(1.5)) {
                         world.set_raw(content, x, y, c.layer, c.mat, id);
                     }
                 }

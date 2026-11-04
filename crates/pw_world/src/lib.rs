@@ -17,6 +17,8 @@ pub struct TileInfo {
     pub cost: f32,
     /// Number of solid particles in this tile.
     pub solid: u8,
+    /// Enough `support` particles (wall, rock) to hold up nearby roofs.
+    pub support: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -130,6 +132,7 @@ impl Chunk {
             let ty = (t as i32) / CHUNK_TILES;
             let mut blocked = 0u32;
             let mut solid = 0u32;
+            let mut support = 0u32;
             let mut no_floor = 0u32;
             let mut cost = 0.0f32;
             for y in 0..TILE {
@@ -138,8 +141,12 @@ impl Chunk {
                     let s = self.mat[1][i];
                     if s != NONE_MAT {
                         solid += 1;
-                        if content.mats[s as usize].blocks {
+                        let sm = &content.mats[s as usize];
+                        if sm.blocks {
                             blocked += 1;
+                            if sm.support {
+                                support += 1;
+                            }
                         }
                     }
                     let f = &content.mats[self.mat[0][i] as usize];
@@ -157,6 +164,7 @@ impl Chunk {
                 walkable,
                 cost: avg * (1.0 + blocked as f32 / n as f32 * 2.0),
                 solid: solid.min(255) as u8,
+                support: support * 4 >= n,
             };
         }
         self.any_tile_dirty = false;
@@ -312,6 +320,38 @@ impl World {
             }
         }
         v
+    }
+
+    /// Every object with a particle in this tile area, in first-seen order.
+    /// Reads chunk arrays directly, so big areas stay fast.
+    pub fn objects_in_rect(&self, rect: TileRect) -> Vec<ObjId> {
+        let (x0, y0) = rect.min.origin();
+        let (x1, y1) = (rect.max.origin().0 + TILE - 1, rect.max.origin().1 + TILE - 1);
+        let (c0, c1) = (chunk_of(x0, y0), chunk_of(x1, y1));
+        let mut seen: FastSet<ObjId> = FastSet::default();
+        let mut out = Vec::new();
+        for cy in c0.y..=c1.y {
+            for cx in c0.x..=c1.x {
+                let Some(ch) = self.chunks.get(&ChunkPos::new(cx, cy)) else { continue };
+                let (ox, oy) = ch.pos.origin();
+                let (lx0, ly0) = ((x0 - ox).max(0), (y0 - oy).max(0));
+                let (lx1, ly1) = ((x1 - ox).min(CHUNK - 1), (y1 - oy).min(CHUNK - 1));
+                for layer in &ch.obj {
+                    for ly in ly0..=ly1 {
+                        let row = &layer[(ly * CHUNK + lx0) as usize..=(ly * CHUNK + lx1) as usize];
+                        let mut last = NO_OBJ;
+                        for &o in row {
+                            // Neighbouring particles usually share an object: skip repeats cheaply.
+                            if o != NO_OBJ && o != last && seen.insert(o) {
+                                out.push(o);
+                            }
+                            last = o;
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
     pub fn insert_chunk(&mut self, chunk: Chunk) {

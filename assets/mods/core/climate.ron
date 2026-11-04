@@ -1,0 +1,30 @@
+// Seasons, day length, temperature and weather. A mod can replace this file
+// (same name in a later-loading mod) to make a different climate.
+//
+// Temperature at a moment = season temp + daily swing (coldest just before
+// sunrise, warmest mid-afternoon) + weather temp + the biome's offset.
+// Weather is picked from the season's weights each time the last one ends.
+ClimateDef(
+    days_per_season: 5,
+    biome_temp_range: 8.0,
+    seasons: [
+        SeasonDef(name: "Spring", temp: 11.0, swing: 6.0, sunrise: 6.0, sunset: 19.0, growth: 1.3,
+            weather: {"core:clear": 4.0, "core:cloudy": 3.0, "core:rain": 3.0, "core:fog": 1.5, "core:windy": 1.5}),
+        SeasonDef(name: "Summer", temp: 21.0, swing: 7.0, sunrise: 5.0, sunset: 21.0, growth: 1.0,
+            weather: {"core:clear": 6.0, "core:cloudy": 2.0, "core:rain": 1.5, "core:storm": 1.0, "core:windy": 1.0}),
+        SeasonDef(name: "Autumn", temp: 9.0, swing: 5.0, sunrise: 6.5, sunset: 18.0, growth: 0.5, autumn: 1.0, leaf_drop: 0.35,
+            weather: {"core:clear": 3.0, "core:cloudy": 3.0, "core:rain": 3.0, "core:fog": 2.0, "core:windy": 2.5, "core:storm": 1.0}),
+        SeasonDef(name: "Winter", temp: -4.0, swing: 4.0, sunrise: 7.5, sunset: 16.5, growth: 0.0, autumn: 0.6, leaf_drop: 0.9,
+            weather: {"core:clear": 3.0, "core:cloudy": 3.0, "core:snow": 3.5, "core:blizzard": 1.0, "core:fog": 1.5}),
+    ],
+    weather: [
+        WeatherDef(id: "core:clear", name: "Clear", wind: (0.0, 0.3), hours: (6.0, 16.0)),
+        WeatherDef(id: "core:cloudy", name: "Overcast", wind: (0.1, 0.4), clouds: 0.6, temp: -1.0, hours: (4.0, 12.0)),
+        WeatherDef(id: "core:windy", name: "Windy", wind: (0.6, 0.9), clouds: 0.2, temp: -2.0, hours: (3.0, 8.0)),
+        WeatherDef(id: "core:fog", name: "Fog", wind: (0.0, 0.1), clouds: 0.3, fog: 0.8, temp: -1.0, hours: (2.0, 6.0)),
+        WeatherDef(id: "core:rain", name: "Rain", precipitation: 0.6, wind: (0.2, 0.5), clouds: 0.8, temp: -3.0, hours: (3.0, 9.0)),
+        WeatherDef(id: "core:storm", name: "Thunderstorm", precipitation: 1.0, wind: (0.7, 1.0), clouds: 1.0, temp: -5.0, hours: (2.0, 5.0)),
+        WeatherDef(id: "core:snow", name: "Snow", precipitation: 0.6, wind: (0.1, 0.4), clouds: 0.7, temp: -3.0, hours: (4.0, 10.0)),
+        WeatherDef(id: "core:blizzard", name: "Blizzard", precipitation: 1.0, wind: (0.8, 1.0), clouds: 1.0, fog: 0.5, temp: -9.0, hours: (2.0, 6.0)),
+    ],
+)

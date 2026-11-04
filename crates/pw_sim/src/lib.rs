@@ -8,6 +8,17 @@ use pw_world::*;
 
 const DIRS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
+/// Weather as the particle reactions see it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SimEnv {
+    /// 0 = dry, 1 = soaked.
+    pub wet: f32,
+    /// Direction the wind blows toward (unit vector) times its strength 0..1.
+    pub wind: (f32, f32),
+    /// Outdoor temperature, C.
+    pub temp: f32,
+}
+
 pub struct SimSettings {
     /// Random cell samples per loaded chunk per tick.
     pub random_samples: usize,
@@ -21,15 +32,57 @@ impl Default for SimSettings {
     }
 }
 
-fn apply(world: &mut World, content: &Content, rng: &mut Rng, r: &ReactionRt, x: i32, y: i32) -> bool {
-    if !rng.chance(r.chance) {
+/// Pick a neighbour direction. Windy reactions favour downwind, and strong
+/// wind sometimes carries them a few cells (embers).
+fn pick_dir(rng: &mut Rng, r: &ReactionRt, same_cell: bool, env: &SimEnv) -> (i32, i32) {
+    let n = if same_cell { 5 } else { 4 };
+    let strength = (env.wind.0 * env.wind.0 + env.wind.1 * env.wind.1).sqrt();
+    if !r.windy || strength < 0.05 {
+        return DIRS.get(rng.below(n)).copied().unwrap_or((0, 0));
+    }
+    let (wx, wy) = (env.wind.0 / strength, env.wind.1 / strength);
+    let mut weights = [0.0f32; 5];
+    for (i, &(dx, dy)) in DIRS.iter().enumerate() {
+        weights[i] = (1.0 + 2.5 * strength * (dx as f32 * wx + dy as f32 * wy)).max(0.1);
+    }
+    if same_cell {
+        weights[4] = 1.0;
+    }
+    let total: f32 = weights[..n].iter().sum();
+    let mut pick = rng.f32() * total;
+    let mut i = 0;
+    while i + 1 < n && pick >= weights[i] {
+        pick -= weights[i];
+        i += 1;
+    }
+    let (dx, dy) = DIRS.get(i).copied().unwrap_or((0, 0));
+    // Embers: in strong wind, a downwind spread may jump 2-3 cells.
+    let downwind = dx as f32 * wx + dy as f32 * wy > 0.5;
+    if downwind && strength > 0.5 && rng.chance((strength - 0.5) * 0.4) {
+        let k = 2 + rng.below(2) as i32;
+        return (dx * k, dy * k);
+    }
+    (dx, dy)
+}
+
+fn apply(world: &mut World, content: &Content, rng: &mut Rng, r: &ReactionRt, x: i32, y: i32, env: &SimEnv) -> bool {
+    if env.temp < r.temp.0 || env.temp > r.temp.1 {
+        return false;
+    }
+    let mut chance = r.chance;
+    if r.wet != 1.0 && env.wet > 0.0 {
+        // Things under a roof or canopy stay mostly dry.
+        let sheltered = r.layer != Layer::Overlay && world.get(x, y, Layer::Overlay) != NONE_MAT;
+        let wet = if sheltered { env.wet * 0.2 } else { env.wet };
+        chance *= 1.0 + (r.wet - 1.0) * wet;
+    }
+    if !rng.chance(chance.min(1.0)) {
         return false;
     }
     let mut other = None;
     if let Some((nl, mask, same)) = &r.neighbor {
         // Four neighbours, plus this same cell on the other layer when allowed.
-        let n = if *same && *nl != r.layer { 5 } else { 4 };
-        let (dx, dy) = DIRS.get(rng.below(n)).copied().unwrap_or((0, 0));
+        let (dx, dy) = pick_dir(rng, r, *same && *nl != r.layer, env);
         let (nx, ny) = (x + dx, y + dy);
         if !world.is_loaded(nx, ny) {
             return false;
@@ -54,7 +107,7 @@ fn apply(world: &mut World, content: &Content, rng: &mut Rng, r: &ReactionRt, x:
     true
 }
 
-pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimSettings) {
+pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimSettings, env: &SimEnv) {
     let rx = &content.reaction_rt;
     let mut keys: Vec<ChunkPos> = world.chunks.keys().copied().collect();
     keys.sort();
@@ -89,7 +142,7 @@ pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimS
                 if world.get(x, y, layer) != m {
                     break;
                 }
-                apply(world, content, rng, &rx.list[ri], x, y);
+                apply(world, content, rng, &rx.list[ri], x, y, env);
             }
             // Still active? Keep it in the list.
             let now = world.get(x, y, layer);
@@ -130,7 +183,7 @@ pub fn tick(world: &mut World, content: &Content, rng: &mut Rng, settings: &SimS
                 continue; // changed by an earlier reaction this tick
             }
             for &ri in &rx.random[layer.index()][m as usize] {
-                if apply(world, content, rng, &rx.list[ri], x, y) {
+                if apply(world, content, rng, &rx.list[ri], x, y, env) {
                     break;
                 }
             }

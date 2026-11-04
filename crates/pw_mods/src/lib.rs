@@ -296,6 +296,13 @@ pub fn load_mod(m: &ModInfo, c: &mut Content, host: &mut ScriptHost, report: &mu
             Err(e) => report.errors.push(format!("{}: {e}", wg.display())),
         }
     }
+    let cl = m.path.join("climate.ron");
+    if let Ok(text) = fs::read_to_string(&cl) {
+        match parse_ron::<ClimateDef>(&text) {
+            Ok(w) => c.climate = w,
+            Err(e) => report.errors.push(format!("{}: {e}", cl.display())),
+        }
+    }
     load_patches(m, c, report);
     load_scripts(m, host, report);
     c.mods.push(m.clone());

@@ -264,6 +264,11 @@ pub struct ObjectDef {
     /// Rhai hooks: `on_destroyed`, `on_built`, `on_harvested`, `on_grown`.
     #[serde(default)]
     pub hooks: BTreeMap<String, String>,
+    /// Roofs: must be within this many tiles of a support (a wall or rock,
+    /// i.e. solid particles tagged `support`), or it can't be built and it
+    /// collapses. 0 = needs no support.
+    #[serde(default)]
+    pub needs_support: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -356,6 +361,17 @@ pub struct ReactionDef {
     #[serde(default)]
     pub mode: ReactionMode,
     pub effects: Vec<EffectDef>,
+    /// Chance multiplier when everything is soaked (rain). 1 = weather does not matter.
+    #[serde(default = "one")]
+    pub wet: f32,
+    /// The neighbour is picked downwind more often in wind (fire, spores).
+    #[serde(default)]
+    pub windy: bool,
+    /// Only happens within this outdoor temperature range (degrees C).
+    #[serde(default)]
+    pub min_temp: Option<f32>,
+    #[serde(default)]
+    pub max_temp: Option<f32>,
 }
 
 /// Built-in behaviours a job can use. New job kinds are made by pointing a
@@ -411,6 +427,97 @@ pub struct CreatureDef {
     /// Colours for `$slot` palette entries, one is picked per creature.
     #[serde(default)]
     pub slots: BTreeMap<String, Vec<String>>,
+}
+
+/// Seasons, day length, temperature and weather. Lives in a mod's `climate.ron`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClimateDef {
+    pub days_per_season: u32,
+    pub seasons: Vec<SeasonDef>,
+    pub weather: Vec<WeatherDef>,
+    /// How much a biome's temperature noise (0..1) shifts the local temperature, +/- this.
+    #[serde(default = "biome_temp_range")]
+    pub biome_temp_range: f32,
+}
+
+fn biome_temp_range() -> f32 {
+    8.0
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SeasonDef {
+    pub name: String,
+    /// Mean temperature (C) and how far it swings warmer by day / colder at night.
+    pub temp: f32,
+    pub swing: f32,
+    /// Hours of sunrise and sunset (dawn and dusk last about an hour each side).
+    pub sunrise: f32,
+    pub sunset: f32,
+    /// Plant growth speed multiplier (0 = no growth).
+    #[serde(default = "one")]
+    pub growth: f32,
+    /// 0 = green leaves, 1 = full autumn colours.
+    #[serde(default)]
+    pub autumn: f32,
+    /// Fraction of leaves gone from trees that are not `evergreen`.
+    #[serde(default)]
+    pub leaf_drop: f32,
+    /// Weather id -> relative weight.
+    pub weather: BTreeMap<String, f32>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WeatherDef {
+    pub id: String,
+    pub name: String,
+    /// 0..1. Falls as snow below freezing, rain above.
+    #[serde(default)]
+    pub precipitation: f32,
+    /// Wind strength range, 0..1.
+    #[serde(default)]
+    pub wind: (f32, f32),
+    /// 0..1 cloud cover (dims the light) and fog.
+    #[serde(default)]
+    pub clouds: f32,
+    #[serde(default)]
+    pub fog: f32,
+    /// Temperature offset (C).
+    #[serde(default)]
+    pub temp: f32,
+    /// How long it lasts, in hours (min, max).
+    pub hours: (f32, f32),
+}
+
+impl Default for ClimateDef {
+    fn default() -> Self {
+        let mut w = BTreeMap::new();
+        w.insert("clear".to_string(), 1.0);
+        Self {
+            days_per_season: 5,
+            seasons: vec![SeasonDef {
+                name: "Summer".into(),
+                temp: 18.0,
+                swing: 6.0,
+                sunrise: 6.0,
+                sunset: 20.0,
+                growth: 1.0,
+                autumn: 0.0,
+                leaf_drop: 0.0,
+                weather: w,
+            }],
+            weather: vec![WeatherDef {
+                id: "clear".into(),
+                name: "Clear".into(),
+                precipitation: 0.0,
+                wind: (0.0, 0.3),
+                clouds: 0.0,
+                fog: 0.0,
+                temp: 0.0,
+                hours: (6.0, 12.0),
+            }],
+            biome_temp_range: 8.0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

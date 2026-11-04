@@ -2,6 +2,7 @@
 //! scripts, runs fixed ticks, streams chunks, and exposes the player's tools.
 //! Nothing here depends on Bevy, so it runs headless in tests.
 
+pub mod env;
 pub mod script;
 
 use std::collections::{HashSet, VecDeque};
@@ -12,11 +13,12 @@ use pw_colony::{Colony, ColonyEvent, nearest_tile};
 use pw_core::*;
 use pw_mods::ScriptHost;
 use pw_objects::{self as objs, ObjectEvent};
-use pw_sim::SimSettings;
+use pw_sim::{SimEnv, SimSettings};
 use pw_world::*;
 use pw_worldgen::{GenPool, Generator};
 
 pub use pw_colony::TPS;
+pub use env::{Env, HOUR_TICKS, Light};
 pub use script::{ScriptCmd, ScriptCtx};
 
 /// Ticks in one in-game day.
@@ -64,6 +66,10 @@ pub struct Game {
     pub sim: SimSettings,
     pub log: VecDeque<String>,
     pub mods_dir: PathBuf,
+    /// Weather, temperature, snow.
+    pub env: Env,
+    /// Why the last `build` call skipped tiles, for the UI.
+    pub last_build_error: Option<String>,
     pool: GenPool,
     /// Chunks wanted by the camera; set by the front end each frame.
     pub view: Option<(ChunkPos, ChunkPos)>,
@@ -88,6 +94,8 @@ impl Game {
             sim: SimSettings::default(),
             log: VecDeque::new(),
             mods_dir,
+            env: Env::default(),
+            last_build_error: None,
             pool: GenPool::new(threads),
             view: None,
         };
@@ -116,6 +124,10 @@ impl Game {
                 }
             }
         }
+        // The colony's biome makes it warmer or colder than the season says.
+        let (cx, cy) = spawn.center();
+        let (_, _, t) = generator.climate(cx, cy);
+        self.env.biome_temp = (t - 0.5) * 2.0 * self.content.climate.biome_temp_range;
         let sc = spawn.chunk();
         for y in -1..=1 {
             for x in -1..=1 {
@@ -166,10 +178,16 @@ impl Game {
     pub fn step(&mut self) {
         let content = self.content.clone();
         self.world.rebuild_tiles(&content);
-        let events = self.colony.tick(&mut self.world, &content, &mut self.rng, self.tick);
-        pw_sim::tick(&mut self.world, &content, &mut self.rng, &self.sim);
+        self.env.tick(&content.climate, self.tick, &mut self.rng);
+        let events = self.colony.tick(&mut self.world, &content, &mut self.rng, self.tick, self.env.walk_speed());
+        let sim_env = SimEnv { wet: self.env.wetness.max(self.env.precip * 0.8), wind: self.env.wind_vec(), temp: self.env.temp };
+        pw_sim::tick(&mut self.world, &content, &mut self.rng, &self.sim, &sim_env);
         let mut obj_events = objs::process_damage(&mut self.world, &content);
-        obj_events.extend(objs::tick_life(&mut self.world, &content, self.tick, &mut self.rng));
+        let growth = self.env.growth(&content.climate, self.tick);
+        obj_events.extend(objs::tick_life(&mut self.world, &content, self.tick, &mut self.rng, growth));
+        if self.tick % 30 == 0 {
+            self.collapse_roofs();
+        }
 
         for e in events {
             match e {
@@ -197,6 +215,45 @@ impl Game {
         self.tick += 1;
     }
 
+    /// Roofs that lost their wall or rock support fall in and leave debris.
+    fn collapse_roofs(&mut self) {
+        let content = self.content.clone();
+        // Roofs still under construction are left alone.
+        let building: HashSet<ObjId> = self.colony.blueprints.values().filter_map(|b| b.obj).collect();
+        let fallen: Vec<_> = objs::unsupported_roofs(&self.world, &content).into_iter().filter(|r| !building.contains(&r.0)).collect();
+        if fallen.is_empty() {
+            return;
+        }
+        for &(id, def, tile) in &fallen {
+            if let Some(ObjectEvent::Destroyed { center, .. }) = objs::destroy(&mut self.world, &content, id) {
+                if let Some(b) = &content.protos[def].build {
+                    for &(item, n) in &b.cost {
+                        let back = n / 2;
+                        if back > 0 {
+                            self.colony.items.add(&self.world, &content, item, back, tile);
+                        }
+                    }
+                }
+                self.run_hook(def, "on_destroyed", center);
+            }
+        }
+        self.message(format!("{} roof tile(s) collapsed: no wall or rock close enough to hold them up.", fallen.len()));
+    }
+
+    /// Year, season name, day of season, hour.
+    pub fn calendar(&self) -> env::Calendar {
+        env::calendar(&self.content.climate, self.tick)
+    }
+
+    pub fn season_name(&self) -> &str {
+        let c = self.calendar();
+        self.content.climate.seasons.get(c.season).map(|s| s.name.as_str()).unwrap_or("")
+    }
+
+    pub fn light(&self) -> Light {
+        env::light(&self.content.climate, self.tick, self.env.clouds)
+    }
+
     pub fn day_time(&self) -> (u64, u32, u32) {
         let day = self.tick / DAY_TICKS + 1;
         let frac = (self.tick % DAY_TICKS) as f32 / DAY_TICKS as f32;
@@ -217,8 +274,10 @@ impl Game {
             }
         };
         if let Some((a, b)) = self.view {
-            // Never request an absurd area when zoomed far out.
-            let a = ChunkPos::new(a.x.max(b.x - 12), a.y.max(b.y - 10));
+            // Never request an absurd area: keep at most 18 x 12 chunks around the view's centre.
+            let (cx, cy) = ((a.x + b.x) / 2, (a.y + b.y) / 2);
+            let a = ChunkPos::new(a.x.max(cx - 9), a.y.max(cy - 6));
+            let b = ChunkPos::new(b.x.min(cx + 9), b.y.min(cy + 6));
             add_box(&mut needed, ChunkPos::new(a.x - 1, a.y - 1), ChunkPos::new(b.x + 1, b.y + 1));
         }
         for p in &self.colony.pawns {
@@ -301,10 +360,12 @@ impl Game {
             .iter()
             .filter(|t| !outline || t.x == rect.min.x || t.x == rect.max.x || t.y == rect.min.y || t.y == rect.max.y)
             .collect();
+        self.last_build_error = None;
         for t in tiles {
             let seed = hash2(self.seed, t.x as i64, t.y as i64);
-            if self.colony.place_blueprint(&self.world, &self.content, d, t, seed) {
-                n += 1;
+            match self.colony.place_blueprint(&self.world, &self.content, d, t, seed) {
+                Ok(()) => n += 1,
+                Err(e) => self.last_build_error = Some(e),
             }
         }
         n

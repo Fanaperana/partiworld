@@ -24,8 +24,12 @@ pub struct Generator {
     warp_x: FastNoiseLite,
     warp_y: FastNoiseLite,
     detail: FastNoiseLite,
+    edge: FastNoiseLite,
     warp: f32,
 }
+
+/// How much biome borders are blended (in climate units, 0..1).
+const EDGE_BLEND: f32 = 0.025;
 
 fn noise(seed: u64, salt: u64, freq: f32, octaves: i32) -> FastNoiseLite {
     let mut n = FastNoiseLite::with_seed((splitmix64(seed ^ salt) & 0x7fff_ffff) as i32);
@@ -61,7 +65,8 @@ impl Generator {
             temp: noise(seed, 3, w.temperature_frequency, 3),
             warp_x: noise(seed, 4, w.elevation_frequency * 4.0, 2),
             warp_y: noise(seed, 5, w.elevation_frequency * 4.0, 2),
-            detail: noise(seed, 6, w.detail_frequency, 2),
+            detail: noise(seed, 6, w.detail_frequency, 3),
+            edge: noise(seed, 7, 0.08, 2),
             warp: w.warp,
         }
     }
@@ -81,6 +86,15 @@ impl Generator {
         content.biome_rt.iter().position(|b| b.matches(e, m, t)).unwrap_or(content.biome_rt.len().saturating_sub(1))
     }
 
+    /// Biome at a particle. Climate is nudged by small-scale noise so borders
+    /// between biomes fray and mix instead of being a smooth hard line.
+    fn biome_at(&self, content: &Content, x: i32, y: i32, e: f32, m: f32, t: f32) -> usize {
+        let n = self.edge.get_noise_2d(x as f32, y as f32);
+        let w = unit(hash2(self.seed ^ 0xED6E, x as i64, y as i64)) - 0.5;
+        let j = (n * 0.75 + w * 0.5) * EDGE_BLEND;
+        Self::biome_for(content, e + j, m - j, t + j * 0.5)
+    }
+
     fn detail_at(&self, x: i32, y: i32) -> f32 {
         let n = norm(self.detail.get_noise_2d(x as f32, y as f32));
         (n * 0.85 + unit(hash2(self.seed ^ 77, x as i64, y as i64)) * 0.15).clamp(0.0, 1.0)
@@ -89,7 +103,7 @@ impl Generator {
     /// Terrain at a single particle (slow path; used for object checks).
     pub fn terrain_at(&self, content: &Content, x: i32, y: i32) -> Terrain {
         let (e, m, t) = self.climate(x as f32, y as f32);
-        let bi = Self::biome_for(content, e, m, t);
+        let bi = self.biome_at(content, x, y, e, m, t);
         let b = &content.biome_rt[bi];
         let floor = b.floor_at(self.detail_at(x, y));
         let solid = b.solid.unwrap_or(NONE_MAT);
@@ -133,9 +147,9 @@ impl Generator {
                 let e = lerp(a.0, b.0, c.0, d.0);
                 let m = lerp(a.1, b.1, c.1, d.1);
                 let t = lerp(a.2, b.2, c.2, d.2);
-                let bi = Self::biome_for(content, e, m, t);
-                let biome = &content.biome_rt[bi];
                 let (x, y) = (ox + lx, oy + ly);
+                let bi = self.biome_at(content, x, y, e, m, t);
+                let biome = &content.biome_rt[bi];
                 let i = (ly * CHUNK + lx) as usize;
                 chunk.mat[0][i] = biome.floor_at(self.detail_at(x, y));
                 if let Some(s) = biome.solid {

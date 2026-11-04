@@ -253,6 +253,7 @@ struct Ctx<'a> {
     content: &'a Content,
     rng: &'a mut Rng,
     events: &'a mut Vec<ColonyEvent>,
+    walk: f32,
 }
 
 fn tags_match(target_tags: &[String], tags: &[String]) -> bool {
@@ -336,12 +337,8 @@ impl Colony {
         let mut added = 0;
         match jd.driver {
             JobDriver::Fell | JobDriver::Harvest | JobDriver::Deconstruct => {
-                let mut seen = BTreeSet::new();
-                for t in rect.iter() {
-                    for o in world.objects_in_tile(t) {
-                        if !seen.insert(o) {
-                            continue;
-                        }
+                {
+                    for o in world.objects_in_rect(rect) {
                         let Some(inst) = world.objects.get(o) else { continue };
                         let proto = &content.protos[inst.def];
                         let ok = match jd.driver {
@@ -430,11 +427,23 @@ impl Colony {
     }
 
     /// Queue a building. Returns false if it cannot go there.
-    pub fn place_blueprint(&mut self, world: &World, content: &Content, def: usize, tile: TilePos, seed: u64) -> bool {
+    pub fn place_blueprint(&mut self, world: &World, content: &Content, def: usize, tile: TilePos, seed: u64) -> Result<(), String> {
         let proto = &content.protos[def];
-        let Some(build) = &proto.build else { return false };
-        if self.blueprints.values().any(|b| b.tile == tile) {
-            return false;
+        let Some(build) = &proto.build else { return Err("not buildable".into()) };
+        if self.blueprints.values().any(|b| b.tile == tile && content.protos[b.def].needs_support == proto.needs_support) {
+            return Err("already planned".into());
+        }
+        // Roofs need a wall or rock nearby, built or planned.
+        let range = proto.needs_support;
+        if range > 0 {
+            let r2 = (range * range) as i32;
+            let planned = self.blueprints.values().any(|b| {
+                let (dx, dy) = (b.tile.x - tile.x, b.tile.y - tile.y);
+                content.protos[b.def].gives_support && dx * dx + dy * dy <= r2
+            });
+            if !planned && !objs::roof_supported(world, tile, range) {
+                return Err(format!("A roof needs a wall or rock within {range} tiles"));
+            }
         }
         let origin = match proto.anchor {
             Anchor::Tile => tile.origin(),
@@ -444,7 +453,7 @@ impl Colony {
             }
         };
         if !objs::can_place(world, content, def, origin, seed) {
-            return false;
+            return Err("blocked".into());
         }
         // Same layer already taken by something built here?
         let cells = proto.cells(seed);
@@ -453,7 +462,7 @@ impl Colony {
             c.layer != Layer::Floor && world.get(x, y, c.layer) != NONE_MAT
         });
         if clash {
-            return false;
+            return Err("something is already built there".into());
         }
         self.next_bp += 1;
         let n = build.cost.len();
@@ -473,19 +482,20 @@ impl Colony {
                 reserved: None,
             },
         );
-        true
+        Ok(())
     }
 
     // ------------------------------------------------------------ simulation
 
-    pub fn tick(&mut self, world: &mut World, content: &Content, rng: &mut Rng, tick: u64) -> Vec<ColonyEvent> {
+    /// `walk` scales walking speed (snow).
+    pub fn tick(&mut self, world: &mut World, content: &Content, rng: &mut Rng, tick: u64, walk: f32) -> Vec<ColonyEvent> {
         let mut events = Vec::new();
         if tick % 30 == 0 {
             self.cleanup(world, content);
         }
         for i in 0..self.pawns.len() {
             let mut pawn = std::mem::take(&mut self.pawns[i]);
-            let mut ctx = Ctx { world, content, rng, events: &mut events };
+            let mut ctx = Ctx { world, content, rng, events: &mut events, walk };
             self.tick_pawn(&mut pawn, &mut ctx);
             self.pawns[i] = pawn;
         }
@@ -543,6 +553,8 @@ impl Colony {
                 pawn.job = self.find_job(pawn, ctx);
             }
             if pawn.job.is_none() {
+                // Nothing to do: look again a bit later (searching is the costly part).
+                pawn.think = 30;
                 if ctx.rng.chance(0.08) {
                     let start = pawn.tile();
                     let dx = ctx.rng.range_i32(-5, 5);
@@ -632,7 +644,7 @@ impl Colony {
             return Err(());
         }
         let speed = ctx.content.creatures.by_idx(pawn.creature).speed;
-        let mut budget = speed * TILE as f32 / TPS / info.cost.max(0.2);
+        let mut budget = speed * ctx.walk * TILE as f32 / TPS / info.cost.max(0.2);
         while budget > 0.0 {
             let Some(&next) = pawn.path.last() else { break };
             let (tx, ty) = next.center();
@@ -757,6 +769,11 @@ impl Colony {
                 needed.insert(item);
             }
             if b.reserved.is_some() || !b.ready(ctx.content) {
+                continue;
+            }
+            // A roof waits until its wall is actually up.
+            let range = ctx.content.protos[b.def].needs_support;
+            if range > 0 && !objs::roof_supported(ctx.world, b.tile, range) {
                 continue;
             }
             let blocks = ctx.content.protos[b.def].blocks;

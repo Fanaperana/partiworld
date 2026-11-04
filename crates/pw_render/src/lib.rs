@@ -21,13 +21,17 @@ pub struct GameRes(pub Game);
 #[derive(Resource)]
 pub struct RenderSettings {
     pub show_overlay: bool,
+    /// Fade roofs and canopies around colonists under them and around the cursor.
+    pub see_through: bool,
+    /// World position of the mouse (set by the UI), for the see-through circle.
+    pub cursor: Option<Vec2>,
     pub overlay_alpha: f32,
     pub show_zones: bool,
 }
 
 impl Default for RenderSettings {
     fn default() -> Self {
-        Self { show_overlay: true, overlay_alpha: 1.0, show_zones: true }
+        Self { show_overlay: true, see_through: true, cursor: None, overlay_alpha: 1.0, show_zones: true }
     }
 }
 
@@ -37,11 +41,29 @@ pub struct SimClock {
     pub speed: u8,
     acc: f32,
     pub last_ticks: u32,
+    /// Colonist positions before the latest tick, so drawing can glide
+    /// between ticks instead of jumping (the sim runs at a different rate
+    /// than the screen).
+    prev: HashMap<u32, (f32, f32)>,
+}
+
+impl SimClock {
+    /// Where to draw a colonist this frame: between its last two tick positions.
+    pub fn draw_pos(&self, p: &pw_colony::Pawn) -> Vec2 {
+        let now = Vec2::new(p.pos.0, p.pos.1);
+        let Some(&(x, y)) = self.prev.get(&p.id) else { return now };
+        let before = Vec2::new(x, y);
+        // A jump (step out of a wall, load) is not interpolated.
+        if before.distance(now) > TILE as f32 * 2.0 || self.speed == 0 {
+            return now;
+        }
+        before.lerp(now, self.acc.clamp(0.0, 1.0))
+    }
 }
 
 impl Default for SimClock {
     fn default() -> Self {
-        Self { speed: 1, acc: 0.0, last_ticks: 0 }
+        Self { speed: 1, acc: 0.0, last_ticks: 0, prev: HashMap::new() }
     }
 }
 
@@ -59,6 +81,17 @@ impl SimClock {
 #[derive(Component)]
 pub struct MainCamera;
 
+/// Most chunks the view may span (width, height). Every visible chunk is
+/// fully loaded and drawn, so this bounds memory and load time when zoomed out.
+pub const MAX_VIEW_CHUNKS: (f32, f32) = (16.0, 10.0);
+
+/// Furthest zoom-out (orthographic scale) for this window size.
+pub fn max_zoom(window_w: f32, window_h: f32) -> f32 {
+    let w = MAX_VIEW_CHUNKS.0 * CHUNK as f32 / window_w.max(1.0);
+    let h = MAX_VIEW_CHUNKS.1 * CHUNK as f32 / window_h.max(1.0);
+    w.min(h).max(0.1)
+}
+
 #[derive(Component)]
 struct ChunkLayer;
 #[derive(Component)]
@@ -69,6 +102,13 @@ struct CarrySprite;
 struct ItemSprite;
 #[derive(Component)]
 struct BlueprintSprite;
+#[derive(Component)]
+struct ShadowSprite;
+/// Full-view tints: sky light (night, dawn, dusk) and weather (cloud, fog).
+#[derive(Component)]
+struct NightTint;
+#[derive(Component)]
+struct FogTint;
 
 struct ChunkView {
     base: Entity,
@@ -80,11 +120,15 @@ struct ChunkView {
 #[derive(Resource, Default)]
 struct Views {
     chunks: HashMap<ChunkPos, ChunkView>,
-    pawns: HashMap<u32, (Entity, Entity)>,
+    pawns: HashMap<u32, (Entity, Entity, Entity)>,
+    shadow_img: Option<Handle<Image>>,
     items: HashMap<u32, (Entity, usize, TilePos)>,
     blueprints: HashMap<u32, Entity>,
     item_images: HashMap<usize, Handle<Image>>,
     bp_images: HashMap<(usize, u64), (Handle<Image>, i32, i32, u32, u32)>,
+    /// See-through circles drawn last frame: (world x, world y, radius).
+    holes: Vec<(f32, f32, f32)>,
+    look: Look,
     /// Bumped when content changes so cached sprites rebuild.
     content_ptr: usize,
 }
@@ -100,7 +144,7 @@ impl Plugin for PwRenderPlugin {
             .add_systems(Startup, setup_camera)
             .add_systems(
                 Update,
-                (run_sim, update_view, sync_chunks, sync_items, sync_blueprints, sync_pawns, draw_zones).chain(),
+                (run_sim, update_view, sync_chunks, sync_items, sync_blueprints, sync_pawns, day_night, weather_fx, draw_zones).chain(),
             );
     }
 }
@@ -113,6 +157,91 @@ fn setup_camera(mut commands: Commands, game: Res<GameRes>) {
         Projection::Orthographic(OrthographicProjection { scale: 0.25, ..OrthographicProjection::default_2d() }),
         Transform::from_xyz(x, y, 100.0),
     ));
+    commands.spawn((Sprite::from_color(Color::NONE, Vec2::ONE), Transform::from_xyz(x, y, 50.0), NightTint));
+    commands.spawn((Sprite::from_color(Color::NONE, Vec2::ONE), Transform::from_xyz(x, y, 51.0), FogTint));
+}
+
+/// The sky tint for this moment: night blue, dawn pink-orange, dusk orange-violet.
+fn sky_color(g: &Game) -> Color {
+    let l = g.light();
+    let night = Vec3::new(0.03, 0.05, 0.16);
+    let glow = if l.dawn { Vec3::new(1.0, 0.62, 0.45) } else { Vec3::new(0.95, 0.42, 0.28) };
+    let w = l.warm / (l.warm + l.dark + 1e-3);
+    let c = night.lerp(glow, w);
+    let a = (0.6 * l.dark + 0.22 * l.warm).min(0.72);
+    Color::srgba(c.x, c.y, c.z, a)
+}
+
+#[allow(clippy::type_complexity)]
+fn day_night(
+    game: Res<GameRes>,
+    cam: Query<(&Transform, &Projection), (With<MainCamera>, Without<NightTint>, Without<FogTint>)>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    mut tint: Query<(&mut Transform, &mut Sprite), (With<NightTint>, Without<FogTint>)>,
+    mut fog: Query<(&mut Transform, &mut Sprite), (With<FogTint>, Without<NightTint>)>,
+) {
+    let (Ok((ct, p)), Ok(w)) = (cam.single(), window.single()) else { return };
+    let scale = match p {
+        Projection::Orthographic(o) => o.scale,
+        _ => 1.0,
+    };
+    let size = Vec2::new(w.width(), w.height()) * scale * 1.1;
+    let g = &game.0;
+    let fog_c = Color::srgba(0.78, 0.8, 0.84, (g.env.fog * 0.5 + g.env.clouds * 0.1).min(0.6));
+    for (q, c) in [(tint.single_mut(), sky_color(g)), (fog.single_mut(), fog_c)] {
+        let Ok((mut t, mut s)) = q else { continue };
+        t.translation.x = ct.translation.x;
+        t.translation.y = ct.translation.y;
+        if s.custom_size != Some(size) {
+            s.custom_size = Some(size);
+        }
+        if s.color != c {
+            s.color = c;
+        }
+    }
+}
+
+/// Falling rain and snow, drawn as short lines that drift with the wind.
+fn weather_fx(
+    game: Res<GameRes>,
+    time: Res<Time>,
+    cam: Query<(&Transform, &Projection), With<MainCamera>>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    mut gizmos: Gizmos,
+) {
+    let env = &game.0.env;
+    if env.precip < 0.03 {
+        return;
+    }
+    let (Ok((ct, p)), Ok(w)) = (cam.single(), window.single()) else { return };
+    let scale = match p {
+        Projection::Orthographic(o) => o.scale,
+        _ => 1.0,
+    };
+    let view = Vec2::new(w.width(), w.height()) * scale;
+    let origin = ct.translation.truncate() - view / 2.0;
+    let snow = env.snowing();
+    let (wx, wy) = env.wind_vec();
+    // Screen-space speeds (pixels per second), turned into world units.
+    let fall = if snow { 70.0 } else { 520.0 };
+    let push = if snow { 160.0 } else { 260.0 };
+    let vel = Vec2::new(wx * push, wy * push * 0.5 - fall) * scale;
+    let n = (env.precip * if snow { 380.0 } else { 520.0 }) as u32;
+    let t = time.elapsed_secs();
+    let color = if snow { Color::srgba(1.0, 1.0, 1.0, 0.85) } else { Color::srgba(0.72, 0.8, 0.95, 0.45) };
+    let streak = if snow { vel.normalize_or_zero() * 1.6 * scale } else { vel * 0.035 };
+    for i in 0..n {
+        let h = splitmix64(i as u64 * 7919 + 13);
+        let (u, v) = (unit(h), unit(splitmix64(h ^ 0x51)));
+        let speed = 0.7 + unit(splitmix64(h ^ 0x52)) * 0.6;
+        // Each drop loops through the view; offset by its own phase.
+        let wobble = if snow { (t * 1.7 + u * 20.0).sin() * 6.0 * scale } else { 0.0 };
+        let mut pos = Vec2::new(u * view.x, v * view.y) + vel * speed * t + Vec2::new(wobble, 0.0);
+        pos.x = pos.x.rem_euclid(view.x);
+        pos.y = pos.y.rem_euclid(view.y);
+        let a = origin + pos;
+        gizmos.line_2d(a, a + streak, color);
+    }
 }
 
 /// Advance the simulation with a fixed tick rate scaled by the speed setting.
@@ -121,6 +250,7 @@ fn run_sim(time: Res<Time>, mut clock: ResMut<SimClock>, mut game: ResMut<GameRe
     clock.acc += time.delta_secs() * TPS * m;
     let mut n = 0;
     while clock.acc >= 1.0 && n < 24 {
+        clock.prev = game.0.colony.pawns.iter().map(|p| (p.id, p.pos)).collect();
         game.0.step();
         clock.acc -= 1.0;
         n += 1;
@@ -170,10 +300,68 @@ fn shade(c: [u8; 4], f: f32) -> [u8; 4] {
     ]
 }
 
+/// Cell size of the soft light/dark mottling on top of per-particle grain.
+const MOTTLE: i32 = 6;
+
+/// Smooth 0..1 value noise on a MOTTLE grid.
+fn mottle(seed: u64, x: i32, y: i32) -> f32 {
+    let (gx, gy) = (x.div_euclid(MOTTLE), y.div_euclid(MOTTLE));
+    let fx = x.rem_euclid(MOTTLE) as f32 / MOTTLE as f32;
+    let fy = y.rem_euclid(MOTTLE) as f32 / MOTTLE as f32;
+    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let v = |a: i32, b: i32| unit(hash2(seed, a as i64, b as i64));
+    let top = v(gx, gy) + (v(gx + 1, gy) - v(gx, gy)) * sx;
+    let bot = v(gx, gy + 1) + (v(gx + 1, gy + 1) - v(gx, gy + 1)) * sx;
+    top + (bot - top) * sy
+}
+
 fn particle_color(content: &Content, m: MatId, seed: u64, x: i32, y: i32, layer: usize) -> [u8; 4] {
     let rt = content.mat_rt(m);
-    let h = unit(hash3(seed ^ 0xC0105, x as i64, y as i64, layer as i64));
+    // Mostly soft patches, a little per-particle grain: reads as texture, not static.
+    let grain = unit(hash3(seed ^ 0xC0105, x as i64, y as i64, layer as i64));
+    let soft = mottle(seed ^ 0x5EED ^ layer as u64, x, y);
+    let h = soft * 0.6 + grain * 0.4;
     shade(rt.color, 1.0 + (h - 0.5) * rt.variance)
+}
+
+/// Seasonal look of the world, quantised so chunks only repaint when it
+/// visibly changes.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Look {
+    /// Snow cover 0..8, frozen water, autumn colour 0..10, leaves gone 0..10.
+    snow: u8,
+    frozen: bool,
+    autumn: u8,
+    drop: u8,
+}
+
+impl Look {
+    fn of(g: &Game) -> Self {
+        let s = pw_game::env::season_now(&g.content.climate, g.tick);
+        Look {
+            snow: (g.env.snow * 8.0).round() as u8,
+            frozen: g.env.temp < -2.0,
+            autumn: (s.autumn * 10.0).round() as u8,
+            drop: (s.leaf_drop * 10.0).round() as u8,
+        }
+    }
+}
+
+const SNOW: [u8; 4] = [236, 240, 247, 255];
+const ICE: [u8; 4] = [184, 212, 232, 255];
+
+fn mix(a: [u8; 4], b: [u8; 4], t: f32) -> [u8; 4] {
+    let f = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    [f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2]), a[3]]
+}
+
+/// Patchy cover: true where snow lies at this level (0..8).
+fn snowy(seed: u64, x: i32, y: i32, level: u8) -> bool {
+    if level == 0 {
+        return false;
+    }
+    let n = mottle(seed ^ 0x5A0, x, y) * 0.7 + unit(hash2(seed ^ 0x5A1, x as i64, y as i64)) * 0.3;
+    n < level as f32 / 8.0 * 1.15
 }
 
 /// Shading reaches this many cells from a changed particle.
@@ -191,7 +379,7 @@ fn mat_at(v: &[MatId], lx: i32, ly: i32) -> MatId {
 }
 
 /// Paint ground + solids for the cells in `r` (local, inclusive).
-fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [u8]) {
+fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [u8], look: Look) {
     let (ox, oy) = chunk.pos.origin();
     let solid = &chunk.mat[1];
     let overlay = &chunk.mat[2];
@@ -213,7 +401,16 @@ fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [
                 }
                 c
             } else {
-                let mut c = particle_color(content, chunk.mat[0][i], seed, x, y, 0);
+                let fm = chunk.mat[0][i];
+                let fr = content.mat_rt(fm);
+                let mut c = particle_color(content, fm, seed, x, y, 0);
+                if fr.water {
+                    if look.frozen {
+                        c = mix(c, ICE, 0.75);
+                    }
+                } else if snowy(seed, x, y, look.snow) {
+                    c = mix(c, SNOW, 0.9);
+                }
                 // Shadows from walls/rocks just below them and from canopies offset down-right.
                 if blocks(mat_at(solid, lx, ly + 1)) {
                     c = shade(c, 0.6);
@@ -232,8 +429,26 @@ fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [
     }
 }
 
+/// Radius (particles) of the see-through circle around the cursor and colonists.
+const HOLE_CURSOR: f32 = 18.0;
+const HOLE_PAWN: f32 = 13.0;
+/// Overlay opacity at the middle of a see-through circle.
+const HOLE_ALPHA: f32 = 0.18;
+
+/// How opaque the overlay stays at a point, given the see-through circles.
+fn hole_factor(holes: &[(f32, f32, f32)], x: f32, y: f32) -> f32 {
+    let mut f: f32 = 1.0;
+    for &(hx, hy, r) in holes {
+        let d = ((x - hx).powi(2) + (y - hy).powi(2)).sqrt();
+        // Soft edge over the outer 5 particles.
+        let t = ((d - (r - 5.0)) / 5.0).clamp(0.0, 1.0);
+        f = f.min(HOLE_ALPHA + (1.0 - HOLE_ALPHA) * t);
+    }
+    f
+}
+
 /// Paint the overlay layer (canopies, roofs) for the cells in `r`.
-fn paint_over(chunk: &Chunk, content: &Content, seed: u64, r: Rect, over: &mut [u8]) {
+fn paint_over(chunk: &Chunk, content: &Content, seed: u64, r: Rect, over: &mut [u8], holes: &[(f32, f32, f32)], look: Look) {
     let (ox, oy) = chunk.pos.origin();
     let overlay = &chunk.mat[2];
     for ly in r.1..=r.3 {
@@ -246,12 +461,33 @@ fn paint_over(chunk: &Chunk, content: &Content, seed: u64, r: Rect, over: &mut [
                 over[p..p + 4].copy_from_slice(&[0, 0, 0, 0]);
                 continue;
             }
-            let mut c = particle_color(content, o, seed, ox + lx, oy + ly, 2);
+            let (x, y) = (ox + lx, oy + ly);
+            let rt = content.mat_rt(o);
+            let mut c = particle_color(content, o, seed, x, y, 2);
+            if rt.leaves && !rt.evergreen {
+                let h = unit(hash2(seed ^ 0x1EAF, x as i64, y as i64));
+                // Leaves fall in patches, not evenly.
+                let gone = mottle(seed ^ 0x1EA0, x, y) * 0.6 + h * 0.4;
+                if gone < look.drop as f32 / 10.0 {
+                    over[p..p + 4].copy_from_slice(&[0, 0, 0, 0]);
+                    continue;
+                }
+                if look.autumn > 0 {
+                    let tone = if h < 0.35 { [196, 72, 38, 255] } else if h < 0.75 { [214, 128, 40, 255] } else { [226, 186, 64, 255] };
+                    c = mix(c, tone, look.autumn as f32 / 10.0 * 0.85);
+                }
+            }
+            if (rt.roof || rt.leaves) && snowy(seed, x, y, if rt.roof { look.snow } else { look.snow / 2 }) {
+                c = mix(c, SNOW, 0.85);
+            }
             let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| mat_at(overlay, lx + dx, ly + dy) == NONE_MAT);
             if edge {
                 c = shade(c, 0.8);
             } else if mat_at(overlay, lx + 1, ly + 1) == NONE_MAT {
                 c = shade(c, 1.12);
+            }
+            if !holes.is_empty() {
+                c[3] = (c[3] as f32 * hole_factor(holes, x as f32 + 0.5, y as f32 + 0.5)) as u8;
             }
             over[p..p + 4].copy_from_slice(&c);
         }
@@ -270,6 +506,14 @@ fn sync_chunks(
     let g = &mut game.0;
     let content = g.content.clone();
     let seed = g.seed;
+    let holes = see_through_holes(g, &settings);
+    let look = Look::of(g);
+    if look != views.look {
+        views.look = look;
+        for ch in g.world.chunks.values_mut() {
+            ch.mark_render_all();
+        }
+    }
     // Remove views for unloaded chunks.
     let gone: Vec<ChunkPos> = views.chunks.keys().filter(|c| !g.world.chunks.contains_key(c)).copied().collect();
     for c in gone {
@@ -302,7 +546,7 @@ fn sync_chunks(
         // are cheap; whole-chunk paints are budgeted per frame.
         let rect = match chunk.render_rect {
             Some(r) => grow(r),
-            None if full_paints < 6 => (0, 0, CHUNK - 1, CHUNK - 1),
+            None if full_paints < 4 => (0, 0, CHUNK - 1, CHUNK - 1),
             None => continue,
         };
         if chunk.render_rect.is_none() {
@@ -312,16 +556,38 @@ fn sync_chunks(
         let (bh, oh) = (v.base_img.clone(), v.over_img.clone());
         if let Some(mut img) = images.get_mut(&bh) {
             if let Some(data) = img.data.as_mut() {
-                paint_base(chunk, &content, seed, rect, data);
+                paint_base(chunk, &content, seed, rect, data, look);
             }
         }
         if let Some(mut img) = images.get_mut(&oh) {
             if let Some(data) = img.data.as_mut() {
-                paint_over(chunk, &content, seed, rect, data);
+                paint_over(chunk, &content, seed, rect, data, &holes, look);
             }
         }
         chunk.render_dirty = false;
         chunk.render_rect = None;
+    }
+    // See-through circles moved: repaint the overlay where they were and are.
+    if holes != views.holes {
+        let old = std::mem::replace(&mut views.holes, holes.clone());
+        for &(hx, hy, r) in old.iter().chain(holes.iter()) {
+            let (x0, y0, x1, y1) = ((hx - r) as i32, (hy - r) as i32, (hx + r) as i32 + 1, (hy + r) as i32 + 1);
+            let (c0, c1) = (chunk_of(x0, y0), chunk_of(x1, y1));
+            for cy in c0.y..=c1.y {
+                for cx in c0.x..=c1.x {
+                    let cp = ChunkPos::new(cx, cy);
+                    let (Some(chunk), Some(v)) = (g.world.chunks.get(&cp), views.chunks.get(&cp)) else { continue };
+                    let (ox, oy) = cp.origin();
+                    let m = CHUNK - 1;
+                    let rect = ((x0 - ox).clamp(0, m), (y0 - oy).clamp(0, m), (x1 - ox).clamp(0, m), (y1 - oy).clamp(0, m));
+                    if let Some(mut img) = images.get_mut(&v.over_img) {
+                        if let Some(data) = img.data.as_mut() {
+                            paint_over(chunk, &content, seed, rect, data, &holes, look);
+                        }
+                    }
+                }
+            }
+        }
     }
     // Overlay visibility / fade.
     for v in views.chunks.values() {
@@ -337,15 +603,81 @@ fn sync_chunks(
     }
 }
 
-fn sprite_image(images: &mut Assets<Image>, s: &SpriteRt, slots: &std::collections::BTreeMap<String, String>) -> Handle<Image> {
-    let mut img = new_image(s.w.max(1), s.h.max(1));
-    if let Some(data) = img.data.as_mut() {
-        for (i, px) in s.pixels.iter().enumerate() {
-            data[i * 4..i * 4 + 4].copy_from_slice(px);
+/// Build a sprite image. With `outline`, a 1-particle dark border is added
+/// around the shape so it stands out on any ground.
+/// Where roofs and canopies should turn see-through this frame: around the
+/// cursor, and around every colonist standing under something.
+fn see_through_holes(g: &Game, settings: &RenderSettings) -> Vec<(f32, f32, f32)> {
+    if !settings.see_through || !settings.show_overlay {
+        return Vec::new();
+    }
+    let covered = |x: f32, y: f32| {
+        [(0, 0), (3, 0), (-3, 0), (0, 3), (0, -3)]
+            .iter()
+            .any(|&(dx, dy)| g.world.get(x as i32 + dx, y as i32 + dy, Layer::Overlay) != NONE_MAT)
+    };
+    let mut holes = Vec::new();
+    if let Some(c) = settings.cursor {
+        if covered(c.x, c.y) {
+            holes.push((c.x.round(), c.y.round(), HOLE_CURSOR));
         }
-        for (i, slot) in &s.slots {
-            let c = slots.get(slot).and_then(|h| parse_color(h)).unwrap_or([255, 0, 255, 255]);
-            data[i * 4..i * 4 + 4].copy_from_slice(&c);
+    }
+    for p in &g.colony.pawns {
+        if covered(p.pos.0, p.pos.1) {
+            holes.push((p.pos.0.round(), p.pos.1.round(), HOLE_PAWN));
+        }
+    }
+    holes
+}
+
+fn sprite_image(images: &mut Assets<Image>, s: &SpriteRt, slots: &std::collections::BTreeMap<String, String>, outline: bool) -> Handle<Image> {
+    let (w, h) = (s.w.max(1) as usize, s.h.max(1) as usize);
+    let mut px: Vec<[u8; 4]> = vec![[0; 4]; w * h];
+    for (i, p) in s.pixels.iter().enumerate().take(w * h) {
+        px[i] = *p;
+    }
+    for (i, slot) in &s.slots {
+        if *i < px.len() {
+            px[*i] = slots.get(slot).and_then(|h| parse_color(h)).unwrap_or([255, 0, 255, 255]);
+        }
+    }
+    let pad = if outline { 1 } else { 0 };
+    let (ow, oh) = (w + pad * 2, h + pad * 2);
+    let mut img = new_image(ow as u32, oh as u32);
+    if let Some(data) = img.data.as_mut() {
+        let solid = |x: i64, y: i64| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && px[y as usize * w + x as usize][3] > 0;
+        for oy in 0..oh {
+            for ox in 0..ow {
+                let (x, y) = (ox as i64 - pad as i64, oy as i64 - pad as i64);
+                let c = if solid(x, y) {
+                    px[y as usize * w + x as usize]
+                } else if outline && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| solid(x + dx, y + dy)) {
+                    [20, 16, 22, 220]
+                } else {
+                    [0, 0, 0, 0]
+                };
+                let i = (oy * ow + ox) * 4;
+                data[i..i + 4].copy_from_slice(&c);
+            }
+        }
+    }
+    images.add(img)
+}
+
+/// Soft oval shadow under colonists.
+fn shadow_image(images: &mut Assets<Image>) -> Handle<Image> {
+    let (w, h) = (10u32, 5u32);
+    let mut img = new_image(w, h);
+    if let Some(data) = img.data.as_mut() {
+        for y in 0..h {
+            for x in 0..w {
+                let dx = (x as f32 + 0.5 - w as f32 / 2.0) / (w as f32 / 2.0);
+                let dy = (y as f32 + 0.5 - h as f32 / 2.0) / (h as f32 / 2.0);
+                let d = dx * dx + dy * dy;
+                let a = if d < 1.0 { ((1.0 - d) * 140.0) as u8 } else { 0 };
+                let i = ((y * w + x) * 4) as usize;
+                data[i..i + 4].copy_from_slice(&[0, 0, 0, a]);
+            }
         }
     }
     images.add(img)
@@ -355,7 +687,7 @@ fn item_image(views: &mut Views, images: &mut Assets<Image>, content: &Content, 
     views
         .item_images
         .entry(item)
-        .or_insert_with(|| sprite_image(images, &content.item_rt[item].sprite, &Default::default()))
+        .or_insert_with(|| sprite_image(images, &content.item_rt[item].sprite, &Default::default(), true))
         .clone()
 }
 
@@ -421,12 +753,19 @@ fn sync_blueprints(mut commands: Commands, game: Res<GameRes>, mut views: ResMut
                 let (w, h) = ((maxx - minx + 1).max(1) as u32, (maxy - miny + 1).max(1) as u32);
                 let mut img = new_image(w, h);
                 if let Some(data) = img.data.as_mut() {
+                    // See-through ghost: faint fill, bright edges.
+                    let filled: HashSet<(i32, i32)> = cells.iter().map(|c| (c.dx, c.dy)).collect();
                     for c in &cells {
                         let col = content.mat_rt(c.mat).color;
                         let (px, py) = ((c.dx - minx) as u32, (maxy - c.dy) as u32);
                         let i = ((py * w + px) * 4) as usize;
-                        let blue = [(col[0] as f32 * 0.5 + 40.0) as u8, (col[1] as f32 * 0.6 + 60.0) as u8, 230, 150];
-                        data[i..i + 4].copy_from_slice(&blue);
+                        let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| !filled.contains(&(c.dx + dx, c.dy + dy)));
+                        let ghost = if edge {
+                            [150, 200, 255, 210]
+                        } else {
+                            [(col[0] as f32 * 0.3 + 70.0) as u8, (col[1] as f32 * 0.3 + 110.0) as u8, 235, 70]
+                        };
+                        data[i..i + 4].copy_from_slice(&ghost);
                     }
                 }
                 (images.add(img), minx, miny, w, h)
@@ -446,23 +785,31 @@ fn sync_pawns(
     mut views: ResMut<Views>,
     mut images: ResMut<Assets<Image>>,
     mut carry: Query<(&mut Sprite, &mut Visibility, &mut Transform), (With<CarrySprite>, Without<PawnSprite>)>,
-    mut bodies: Query<&mut Transform, (With<PawnSprite>, Without<CarrySprite>)>,
+    mut bodies: Query<&mut Transform, (With<PawnSprite>, Without<CarrySprite>, Without<ShadowSprite>)>,
+    mut shadows: Query<&mut Transform, (With<ShadowSprite>, Without<CarrySprite>, Without<PawnSprite>)>,
+    clock: Res<SimClock>,
 ) {
     let g = &game.0;
     let live: HashSet<u32> = g.colony.pawns.iter().map(|p| p.id).collect();
     let gone: Vec<u32> = views.pawns.keys().filter(|k| !live.contains(k)).copied().collect();
     for id in gone {
-        let (a, b) = views.pawns.remove(&id).unwrap();
+        let (a, b, sh) = views.pawns.remove(&id).unwrap();
         commands.entity(a).despawn();
         commands.entity(b).despawn();
+        commands.entity(sh).despawn();
     }
     for p in &g.colony.pawns {
-        let pos = Transform::from_xyz(p.pos.0, p.pos.1, 10.0);
-        let carry_pos = Transform::from_xyz(p.pos.0 + 3.0, p.pos.1 + 4.0, 11.0);
+        let d = clock.draw_pos(p);
+        let pos = Transform::from_xyz(d.x, d.y, 10.0);
+        let carry_pos = Transform::from_xyz(d.x + 3.0, d.y + 4.0, 11.0);
+        let shadow_pos = Transform::from_xyz(d.x + 0.5, d.y - 3.5, 9.0);
         match views.pawns.get(&p.id) {
-            Some(&(e, c)) => {
+            Some(&(e, c, sh)) => {
                 if let Ok(mut t) = bodies.get_mut(e) {
                     t.translation = pos.translation;
+                }
+                if let Ok(mut t) = shadows.get_mut(sh) {
+                    t.translation = shadow_pos.translation;
                 }
                 if let Ok((mut s, mut vis, mut t)) = carry.get_mut(c) {
                     t.translation = carry_pos.translation;
@@ -481,12 +828,21 @@ fn sync_pawns(
                 }
             }
             None => {
-                let img = sprite_image(&mut images, &g.content.creature_rt[p.creature].sprite, &p.slots);
+                let img = sprite_image(&mut images, &g.content.creature_rt[p.creature].sprite, &p.slots, true);
                 let e = commands.spawn((Sprite::from_image(img), pos, PawnSprite)).id();
                 let c = commands
                     .spawn((Sprite::default(), carry_pos, Visibility::Hidden, CarrySprite))
                     .id();
-                views.pawns.insert(p.id, (e, c));
+                let shadow = match &views.shadow_img {
+                    Some(h) => h.clone(),
+                    None => {
+                        let h = shadow_image(&mut images);
+                        views.shadow_img = Some(h.clone());
+                        h
+                    }
+                };
+                let sh = commands.spawn((Sprite::from_image(shadow), shadow_pos, ShadowSprite)).id();
+                views.pawns.insert(p.id, (e, c, sh));
             }
         }
     }

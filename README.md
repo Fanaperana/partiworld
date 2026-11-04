@@ -18,6 +18,10 @@ The number is the world seed (optional).
 | Left drag | Use the selected tool on an area |
 | Right click, Esc | Back to Inspect |
 | R | Hide canopies and roofs |
+| V | See-through roofs: they fade around colonists under them and around the mouse |
+| C / M / G / X / Z / B / T | Chop, mine, harvest, cancel, stockpile, build (last pick), plant (last pick) |
+| Click a colonist, F | Select, follow with the camera |
+| P | Work priorities |
 | F5 / F9 | Quick save / load (`saves/quicksave.pws`) |
 
 Each colonist has work priorities (Info panel > **Work priorities**): 1 = do first, 4 = do last, blank = never. Builders carry a full load of materials and drop it at several blueprints in one trip, and stand outside the room they are walling in.
@@ -77,4 +81,4 @@ Covers mod loading and patching, dependency sorting, deterministic world generat
 
 `cargo test --release -p pw_game --test game bench -- --ignored --nocapture` times a busy colony (ms per tick).
 
-`PW_AUTOSHOT=shot.png cargo run` runs a short scripted session, saves a screenshot and quits.
+`PW_AUTOSHOT=shot.png cargo run` runs a short scripted session, saves a screenshot and quits. Extras: `PW_AUTOSHOT_SECS` (when to shoot), `PW_AUTOSHOT_HOUR` (start at that hour, for night), `PW_AUTOSHOT_ROOF=1` (a finished roof with a colonist under it).

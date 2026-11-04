@@ -176,7 +176,9 @@ impl Editor {
             return Err("paint something first".into());
         }
         let palette = chars.iter().map(|(m, ch)| (*ch, c.mat_id_str(*m).to_string())).collect();
-        let tags = self.tags.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+        let tags: Vec<String> = self.tags.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+        // Anything tagged as a roof follows the roof rule: a wall or rock within 6 tiles.
+        let needs_support = if tags.iter().any(|t| t == "roof") { 6 } else { 0 };
         Ok(ObjectDef {
             id,
             name: self.name.clone(),
@@ -197,6 +199,7 @@ impl Editor {
             growth: None,
             regrow: None,
             hooks: BTreeMap::new(),
+            needs_support,
         })
     }
 

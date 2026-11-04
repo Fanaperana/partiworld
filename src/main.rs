@@ -70,6 +70,7 @@ fn main() {
         .insert_resource(GameRes(game))
         .add_plugins((PwRenderPlugin, PwUiPlugin))
         .add_systems(Update, autoshot.run_if(|| std::env::var("PW_AUTOSHOT").is_ok()))
+        .add_systems(Update, frame_stats.run_if(|| std::env::var("PW_FRAMES").is_ok()))
         .run();
 }
 
@@ -82,8 +83,12 @@ fn autoshot(
     mut step: Local<u8>,
     mut ui: ResMut<pw_ui::UiState>,
     mut exit: MessageWriter<AppExit>,
+    mut clock: ResMut<pw_render::SimClock>,
 ) {
     let t = time.elapsed_secs();
+    if let Some(s) = std::env::var("PW_AUTOSHOT_SPEED").ok().and_then(|s| s.parse().ok()) {
+        clock.speed = s;
+    }
     let g = &mut game.0;
     if *step == 0 && t > 1.0 {
         *step = 1;
@@ -95,6 +100,44 @@ fn autoshot(
         g.stockpile(r((-6, -6), (-3, -3)), true);
         g.build("core:wall_wood", r((3, 2), (8, 6)));
         g.build("core:floor_wood", r((4, 3), (7, 5)));
+        g.build("core:roof_thatch", r((3, 2), (8, 6)));
+        // Optional: start at a given hour to check day/night.
+        let day = std::env::var("PW_AUTOSHOT_DAY").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1).max(1) - 1;
+        let hour = std::env::var("PW_AUTOSHOT_HOUR").ok().and_then(|s| s.parse::<f32>().ok()).unwrap_or(6.0);
+        g.tick = day * pw_game::DAY_TICKS + (((hour - 6.0).rem_euclid(24.0) / 24.0) * pw_game::DAY_TICKS as f32) as u64;
+        // Optional: force a weather, fully set in (rain, snow, fog...).
+        if let Ok(w) = std::env::var("PW_AUTOSHOT_WEATHER") {
+            let climate = g.content.climate.clone();
+            if let Some(def) = climate.weather.iter().find(|d| d.id == w) {
+                let e = &mut g.env;
+                e.weather = def.id.clone();
+                e.weather_until = g.tick + 100_000;
+                e.precip = def.precipitation;
+                e.clouds = def.clouds;
+                e.fog = def.fog;
+                e.wind = def.wind.1;
+                e.wind_target = def.wind.1;
+                let s = pw_game::env::season_now(&climate, g.tick);
+                e.temp = s.temp + def.temp + e.biome_temp;
+                if e.temp < 0.0 && def.precipitation > 0.0 {
+                    e.snow = 0.8;
+                } else if def.precipitation > 0.0 {
+                    e.wetness = 0.8;
+                }
+            }
+        }
+        ui.selected = g.colony.pawns.first().map(|p| p.id);
+        // A finished roof with a colonist under it, to check see-through roofs.
+        if std::env::var("PW_AUTOSHOT_ROOF").is_ok() {
+            for t in r((-12, 3), (-8, 7)).iter() {
+                let (x, y) = t.origin();
+                g.place_object("core:roof_thatch", x, y);
+            }
+            g.spawn_colonist(home.offset(-10, 5));
+            if let Some(p) = g.colony.pawns.last_mut() {
+                p.drafted = true; // stay put under the roof
+            }
+        }
         let (x, y) = home.offset(16, 10).center();
         g.ignite(x as i32, y as i32, 4);
     }
@@ -106,5 +149,18 @@ fn autoshot(
     }
     if *step == 2 && t > shot_at + 2.0 {
         exit.write(AppExit::Success);
+    }
+}
+
+/// Testing aid: `PW_FRAMES=1` prints frame time stats every 2 seconds.
+fn frame_stats(time: Res<Time>, mut acc: Local<(f32, f32, u32, f32)>, clock: Res<pw_render::SimClock>) {
+    let dt = time.delta_secs() * 1000.0;
+    acc.0 += dt;
+    acc.1 = acc.1.max(dt);
+    acc.2 += 1;
+    acc.3 += time.delta_secs();
+    if acc.3 >= 2.0 {
+        println!("FRAMES avg {:.2} ms, worst {:.2} ms, {} frames, speed {}", acc.0 / acc.2 as f32, acc.1, acc.2, clock.speed);
+        *acc = (0.0, 0.0, 0, 0.0);
     }
 }
