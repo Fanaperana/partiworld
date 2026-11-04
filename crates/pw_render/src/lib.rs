@@ -418,6 +418,10 @@ fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [
             let col = if s != NONE_MAT {
                 // Fake height: lit top edge, dark bottom edge.
                 let mut c = particle_color(content, s, seed, x, y, 1);
+                if content.mat_rt(s).leaves {
+                    let (lit, crease) = leaf_clump(seed ^ 0xB054, x, y);
+                    c = shade(c, 1.0 + lit * 0.18 - crease * 0.2);
+                }
                 if blocks(s) && mat_at(solid, lx, ly - 1) == NONE_MAT {
                     c = shade(c, 0.62);
                 } else if mat_at(solid, lx, ly + 1) == NONE_MAT {
@@ -467,6 +471,38 @@ fn hole_factor(holes: &[(f32, f32, f32)], x: f32, y: f32) -> f32 {
     f
 }
 
+/// Size (particles) of one leaf clump in a canopy.
+const CLUMP: i32 = 4;
+
+/// Cellular noise for leafy canopies: every cell holds one clump centre.
+/// Returns (lit, crease): `lit` is -1..1, how much this spot faces the
+/// top-left light within its clump; `crease` is 0..1, high in the dark
+/// gaps where two clumps meet.
+fn leaf_clump(seed: u64, x: i32, y: i32) -> (f32, f32) {
+    let (gx, gy) = (x.div_euclid(CLUMP), y.div_euclid(CLUMP));
+    let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+    let (mut d1, mut d2, mut v) = (f32::MAX, f32::MAX, (0.0, 0.0));
+    for cy in gy - 1..=gy + 1 {
+        for cx in gx - 1..=gx + 1 {
+            let jx = unit(hash2(seed ^ 0xC1A, cx as i64, cy as i64));
+            let jy = unit(hash2(seed ^ 0xC1B, cx as i64, cy as i64));
+            let (ux, uy) = (px - (cx as f32 + jx) * CLUMP as f32, py - (cy as f32 + jy) * CLUMP as f32);
+            let d = (ux * ux + uy * uy).sqrt();
+            if d < d1 {
+                d2 = d1;
+                d1 = d;
+                v = (ux, uy);
+            } else if d < d2 {
+                d2 = d;
+            }
+        }
+    }
+    // Light comes from the top-left: -x, +y in world space.
+    let lit = ((-v.0 + v.1) * std::f32::consts::FRAC_1_SQRT_2 / CLUMP as f32).clamp(-1.0, 1.0);
+    let crease = (1.0 - (d2 - d1) / 1.5).clamp(0.0, 1.0);
+    (lit, crease)
+}
+
 /// Paint the overlay layer (canopies, roofs) for the cells in `r`.
 fn paint_over(chunk: &Chunk, content: &Content, seed: u64, r: Rect, over: &mut [u8], holes: &[(f32, f32, f32)], look: Look) {
     let (ox, oy) = chunk.pos.origin();
@@ -501,7 +537,24 @@ fn paint_over(chunk: &Chunk, content: &Content, seed: u64, r: Rect, over: &mut [
                 c = mix(c, SNOW, 0.85);
             }
             let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| mat_at(overlay, lx + dx, ly + dy) == NONE_MAT);
-            if edge {
+            if rt.leaves {
+                // Round leaf clumps, lit from the top-left like the rest of the world.
+                let (lit, crease) = leaf_clump(seed, x, y);
+                let mut f = 1.0 + lit * 0.2 - crease * 0.22;
+                // Whole-canopy volume: the side facing the light is brighter,
+                // the far side darker. Looks up to 3 cells toward each side.
+                let open = |dx: i32, dy: i32| (1..=SHADE_REACH).find(|&k| mat_at(overlay, lx + dx * k, ly + dy * k) == NONE_MAT);
+                if let Some(k) = open(-1, 1) {
+                    f += 0.16 / k as f32;
+                }
+                if let Some(k) = open(1, -1) {
+                    f -= 0.24 / k as f32;
+                }
+                if edge {
+                    f -= 0.1;
+                }
+                c = shade(c, f);
+            } else if edge {
                 c = shade(c, 0.8);
             } else if mat_at(overlay, lx + 1, ly + 1) == NONE_MAT {
                 c = shade(c, 1.12);
@@ -623,8 +676,6 @@ fn sync_chunks(
     }
 }
 
-/// Build a sprite image. With `outline`, a 1-particle dark border is added
-/// around the shape so it stands out on any ground.
 /// Where roofs and canopies should turn see-through this frame: around the
 /// cursor, and around every colonist standing under something.
 fn see_through_holes(g: &Game, settings: &RenderSettings) -> Vec<(f32, f32, f32)> {
@@ -650,6 +701,8 @@ fn see_through_holes(g: &Game, settings: &RenderSettings) -> Vec<(f32, f32, f32)
     holes
 }
 
+/// Build a sprite image. With `outline`, a 1-particle dark border is added
+/// around the shape so it stands out on any ground.
 fn sprite_image(images: &mut Assets<Image>, s: &SpriteRt, slots: &std::collections::BTreeMap<String, String>, outline: bool) -> Handle<Image> {
     let (w, h) = (s.w.max(1) as usize, s.h.max(1) as usize);
     let mut px: Vec<[u8; 4]> = vec![[0; 4]; w * h];
@@ -658,7 +711,13 @@ fn sprite_image(images: &mut Assets<Image>, s: &SpriteRt, slots: &std::collectio
     }
     for (i, slot) in &s.slots {
         if *i < px.len() {
-            px[*i] = slots.get(slot).and_then(|h| parse_color(h)).unwrap_or([255, 0, 255, 255]);
+            // `skin-` is a shadow tone of `skin`, `skin+` a highlight.
+            let name = slot.trim_end_matches(['+', '-']);
+            let mut c = slots.get(name).and_then(|h| parse_color(h)).unwrap_or([255, 0, 255, 255]);
+            for m in slot[name.len()..].chars() {
+                c = if m == '-' { mix(shade(c, 0.72), [52, 36, 84, 255], 0.14) } else { mix(c, [255, 244, 214, 255], 0.24) };
+            }
+            px[*i] = c;
         }
     }
     let pad = if outline { 1 } else { 0 };
@@ -671,8 +730,24 @@ fn sprite_image(images: &mut Assets<Image>, s: &SpriteRt, slots: &std::collectio
                 let (x, y) = (ox as i64 - pad as i64, oy as i64 - pad as i64);
                 let c = if solid(x, y) {
                     px[y as usize * w + x as usize]
-                } else if outline && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| solid(x + dx, y + dy)) {
-                    [20, 16, 22, 220]
+                } else if outline {
+                    // Outline in a deep tone of what it borders, not flat black.
+                    let (mut sum, mut n) = ([0u32; 3], 0u32);
+                    for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                        if solid(x + dx, y + dy) {
+                            let p = px[(y + dy) as usize * w + (x + dx) as usize];
+                            for k in 0..3 {
+                                sum[k] += p[k] as u32;
+                            }
+                            n += 1;
+                        }
+                    }
+                    if n == 0 {
+                        [0, 0, 0, 0]
+                    } else {
+                        let t = |k: usize, add: u32| ((sum[k] / n) as f32 * 0.28) as u8 + add as u8;
+                        [t(0, 8), t(1, 6), t(2, 12), 235]
+                    }
                 } else {
                     [0, 0, 0, 0]
                 };
@@ -825,7 +900,9 @@ fn sync_pawns(
         let d = clock.draw_pos_of(owner, p);
         let pos = Transform::from_xyz(d.x, d.y, 10.0);
         let carry_pos = Transform::from_xyz(d.x + 3.0, d.y + 4.0, 11.0);
-        let shadow_pos = Transform::from_xyz(d.x + 0.5, d.y - 3.5, 9.0);
+        // Shadow under the feet: sprites are centred, so drop by half the height.
+        let feet = g.content.creature_rt[p.creature].sprite.h as f32 * 0.5;
+        let shadow_pos = Transform::from_xyz(d.x + 0.5, d.y - feet + 0.5, 9.0);
         match views.pawns.get(&key) {
             Some(&(e, c, sh)) => {
                 if let Ok(mut t) = bodies.get_mut(e) {
@@ -937,7 +1014,19 @@ fn sync_animals(
                         h
                     }
                 };
-                let e = commands.spawn((Sprite::from_image(img), t, AnimalSprite)).id();
+                let shadow = match &views.shadow_img {
+                    Some(h) => h.clone(),
+                    None => {
+                        let h = shadow_image(&mut images);
+                        views.shadow_img = Some(h.clone());
+                        h
+                    }
+                };
+                // Ground shadow as a child, so it follows and scales with the animal.
+                let spr = &g.content.creature_rt[c.def].sprite;
+                let sh = Transform::from_xyz(0.5, -(spr.h as f32) * 0.5 + 0.5, -0.5)
+                    .with_scale(Vec3::new((spr.w as f32 + 2.0) / 10.0, 1.0, 1.0));
+                let e = commands.spawn((Sprite::from_image(img), t, AnimalSprite, children![(Sprite::from_image(shadow), sh)])).id();
                 views.animals.insert(c.id, (e, key));
             }
         }

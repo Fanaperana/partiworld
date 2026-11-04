@@ -1,18 +1,28 @@
 CreatureDef(
     id: "core:colonist",
     name: "Colonist",
-    // Seen from above: hair, face, shoulders, arms. One tile (8x8 particles).
+    // Front view, lit from the top-left. `$slot-` is a shadow tone and
+    // `$slot+` a highlight of that slot's colour.
     sprite: SpriteDef(
-        palette: {'h': "$hair", 's': "$skin", 'S': "$shirt", 'p': "#2d2a33"},
+        palette: {
+            'h': "$hair", 'H': "$hair-", 'j': "$hair+",
+            's': "$skin", 'd': "$skin-", 'e': "#1e1820",
+            'S': "$shirt", 'D': "$shirt-", 'L': "$shirt+",
+            'p': "#3a3546", 'P': "#2a2632", 'b': "#2a1e16",
+        },
         rows: [
-            "..hhhh..",
-            ".hhhhhh.",
-            ".hhsshh.",
-            "..ssss..",
-            ".SSSSSS.",
-            "sSSSSSSs",
-            "sSSSSSSs",
-            ".pp..pp.",
+            "...hhh...",
+            "..hjjhH..",
+            ".hjhhhhH.",
+            ".hsssshH.",
+            ".hsesedH.",
+            "..ssssd..",
+            "..LSSSD..",
+            ".LLSSSDD.",
+            ".LSSSSSD.",
+            ".sppppPd.",
+            "..pp.PP..",
+            "..bb.bb..",
         ],
     ),
     speed: 3.2,
