@@ -3,7 +3,9 @@
 //! Nothing here depends on Bevy, so it runs headless in tests.
 
 pub mod env;
+pub mod llm;
 pub mod script;
+pub mod social;
 
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
@@ -22,6 +24,10 @@ use pw_worldgen::{GenPool, Generator};
 pub use pw_colony::{Needs, TPS};
 pub use env::{Env, HOUR_TICKS, Light};
 pub use script::{ScriptCmd, ScriptCtx};
+pub use social::{Social, Who};
+
+/// Where the model settings are kept.
+pub const MODEL_CONFIG: &str = "saves/model.json";
 
 /// Ticks in one in-game day.
 pub const DAY_TICKS: u64 = 30 * 60 * 6;
@@ -85,6 +91,8 @@ pub struct Game {
     pool: GenPool,
     /// Chunks wanted by the camera; set by the front end each frame.
     pub view: Option<(ChunkPos, ChunkPos)>,
+    /// Chats, friendships, moods, and the optional language model.
+    pub social: Social,
 }
 
 impl Game {
@@ -116,6 +124,7 @@ impl Game {
             last_weather: String::new(),
             pool: GenPool::new(threads),
             view: None,
+            social: Social::new(llm::LlmConfig::load(std::path::Path::new(MODEL_CONFIG))),
         };
         g.start_colony();
         g
@@ -277,6 +286,7 @@ impl Game {
         };
         let tribe_events = self.tribes.tick(&mut self.world, &content, &mut self.rng, &tribe_env, &mut self.life);
         self.handle_tribes(tribe_events);
+        self.social_tick();
         if self.tick % DAY_TICKS == DAY_TICKS / 2 {
             self.migrate();
         }
@@ -299,6 +309,7 @@ impl Game {
                 ColonyEvent::Message(m) => self.message(m),
                 ColonyEvent::Died { name, cause, .. } => {
                     self.message(format!("{name} {cause} to death."));
+                    self.mourn(&name, 0);
                     self.fire_event("on_colonist_died", vec![name.into(), cause.into()]);
                 }
             }
@@ -834,6 +845,10 @@ impl Game {
                     self.message(format!("The {tribe} have discovered {tech}."));
                     self.fire_event("on_discovery", vec![tribe.into(), tech.into()]);
                 }
+                TribeEvent::Died { tribe, name, .. } => {
+                    let owner = self.tribes.living().find(|t| t.name == tribe).map(|t| t.id).unwrap_or(u32::MAX);
+                    self.mourn(&name, owner);
+                }
                 TribeEvent::Lost { name } => {
                     self.message(format!("The {name} are no more."));
                     self.fire_event("on_tribe_lost", vec![name.into()]);
@@ -895,6 +910,8 @@ impl Game {
             let age = m.age as f32 / DAY_TICKS as f32;
             out.push(format!("{age:.0} days old{}", if m.hunger > 0 { ", hungry" } else { "" }));
         }
+        let traits = p.mind.persona.traits();
+        out.push(format!("Feels {}{}{}", p.mind.mood_word(), if traits.is_empty() { String::new() } else { format!(", {}", traits.join(", ")) }, if p.mind.hooked { ", thinking with a model" } else { "" }));
         out
     }
 

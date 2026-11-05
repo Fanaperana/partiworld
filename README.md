@@ -87,6 +87,19 @@ The number is the world seed; leave it out for the default world. The first buil
 - **They grow and spread.** Tribes with food and free beds have children. People grow old and die, or starve if the stores run out. When a village gets big, a band leaves to found a daughter tribe nearby. The band takes its share of the food and all the knowledge, and its culture and traits (fertility, wanderlust, boldness, curiosity) are a little changed. Over time, neighbouring tribes value different things.
 - The **Tribes** window (K) shows each tribe's people over time, culture, traits, known techs, research progress and story, with a button to jump to its village.
 
+**People with minds of their own**
+- **Personality.** Everyone, colonist or tribesperson, is born somewhere between chatty and shy, kind and grumpy, hardworking and lazy, brave and timid, curious and a homebody. Hard workers work faster, lazy ones take breathers between jobs, curious ones roam further, and the bravest tribesperson goes on the hunt.
+- **Mood.** Feelings come and go: a good meal, a night in a real bed, a cozy fire, rain on your head, loneliness, a friend's death. Happy people work a little faster; miserable ones drag their feet, and at rock bottom someone may walk off alone to cry it out.
+- **Talk.** People who meet with time on their hands stop and chat, and their words appear in speech bubbles. They talk about the weather, their work, being hungry or cold, what's past the hills, and each other. Strangers from different villages introduce themselves. The **Chatter** window (J) keeps a log of everything said.
+- **Friends and rivals.** Every chat changes what two people think of each other, depending on how well their personalities fit and what was said (agreeing about a mutual enemy helps, insults don't). Lonely people go looking for a friend. Friendships and feuds are announced, and a death hits those who loved them hardest.
+- **Memories.** Each person remembers who they met, what was said, and what happened. Click anyone to open the **Character** window (I): their traits, current thought, mood and why, friends and rivals, and memories.
+
+**Hook a language model into someone's head**
+- In the Character window, tick **Let a model think for them**. A language model then decides what that person says and does next (work, eat, sleep, warm up, rest, wander, explore, go home, or walk over and talk to someone), and voices their lines when they chat. Their thoughts show in violet, and a violet mark floats over their head.
+- The model gets plain notes about the person: time and weather, mood and why, hunger and tiredness, what they're doing, who is nearby and what they think of them, and recent memories. **Show notes sent to the model** displays exactly what it reads.
+- It works with any OpenAI-style chat endpoint: [Ollama](https://ollama.com), llama.cpp's server, LM Studio, or a hosted API. With Ollama: install it, run `ollama pull llama3.2:3b`, and keep the default URL. **Model settings** has the URL, model (with a *Find models* button), API key, how often each person thinks, and a *Test* button; *Save* writes them to `saves/model.json`. `PW_LLM_URL`, `PW_LLM_MODEL` and `PW_LLM_KEY` override the file.
+- Requests run in the background, so the world never waits for the model. If it's slow or down, people carry on with their usual habits. Small models (1B) often lose the thread; 3B and up play the part much better.
+
 **Physics**
 - Water fills dug channels, freezes into walkable ice in winter and thaws in spring.
 - Lava flows, sets things alight, boils water into steam, turns sand into glass and cools into basalt.
@@ -110,6 +123,7 @@ The number is the world seed; leave it out for the default world. The first buil
 | C / M / G / X | Chop, mine, harvest, cancel orders |
 | Z / B / T | Stockpile zone, build (last pick), plant (last pick) |
 | Click a colonist, F | Select, follow with the camera |
+| Click anyone, I / J | Character window (mind, friends, memories, model) / chatter log |
 | P / L / K | Work priorities / wild life and evolution / tribes |
 | F2 | Data editor |
 | R / V | Hide roofs and tree tops / see-through roofs |
@@ -138,10 +152,10 @@ The simulation has no dependency on the game engine. It runs headless, which is 
 | `pw_objects` | Stamping objects, wearing them down, breaking, growth, roof support |
 | `pw_worldgen` | Seeded noise to biomes, ground, mountains, ore veins and scattered plants, generated on background threads |
 | `pw_sim` | Particle reactions from data (fire, grass, ash), affected by wind, rain and temperature |
-| `pw_colony` | Colonists, pathfinding, orders, jobs, hauling, stockpiles, construction |
+| `pw_colony` | Colonists, pathfinding, orders, jobs, hauling, stockpiles, construction; each person's mind (personality, mood, memories, opinions) |
 | `pw_life` | Wild animals: perception, decisions, a learning brain, genes, breeding, evolution and species |
 | `pw_tribe` | Tribes: a chief AI on top of the colony job system, learned culture, research, births, deaths and daughter tribes |
-| `pw_game` | The tick loop, seasons and weather, chunk streaming, player tools, script API, Rust plugin hooks |
+| `pw_game` | The tick loop, seasons and weather, chunk streaming, player tools, script API, Rust plugin hooks; the social life of people and the bridge to a language model |
 | `pw_save` | Saves only the chunks you changed; content is saved by id so saves survive mod changes |
 | `pw_render` | Chunk textures, sprites, lighting and weather effects, all drawn from particle data (no sprite files) |
 | `pw_ui` | Panels, tools and the object editor ([egui](https://github.com/emilk/egui)) |
@@ -247,6 +261,7 @@ The tests cover:
 - animals eating, breeding, learning, hunting and evolving into new species
 - tribes settling, building huts, learning, hunting, researching and founding daughter tribes, and surviving save/load
 - forests spreading
+- people with personalities, moods that follow their needs, chats that build friendships, grief, and a model driving a colonist (against a fake model server, plus a model that's down)
 - script world events
 - editing every definition as text, live content swaps and hot reload
 - plant growth and save/load
@@ -262,6 +277,8 @@ Tools for testing:
   - `PW_AUTOSHOT_SPEED`: game speed
   - `PW_AUTOSHOT_TRIBES=N`: let the tribes live N days, then look at one
   - `PW_AUTOSHOT_NEEDS=1`: select a hungry colonist to show its needs
+  - `PW_AUTOSHOT_PEOPLE=1`: lonely colonists, zoomed in, with the Character and Chatter windows open; add `PW_AUTOSHOT_MODEL=llama3.2:3b` to hook the first one to a model
+- **A real model at work:** `PW_LIVE_MODEL=llama3.2:3b cargo test -p pw_game --test social live_model -- --ignored --nocapture` lets a local model run a colonist for 90 seconds and prints its thoughts and lines.
 - **Frame times:** `PW_FRAMES=1` prints frame timings.
 
 ## Roadmap

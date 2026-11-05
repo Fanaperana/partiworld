@@ -76,6 +76,7 @@ fn main() {
 
 /// Testing aid: `PW_AUTOSHOT=out.png` places a few orders, lets the colony
 /// work for a while, saves a screenshot and quits.
+#[allow(clippy::too_many_arguments)]
 fn autoshot(
     mut commands: Commands,
     time: Res<Time>,
@@ -84,6 +85,7 @@ fn autoshot(
     mut ui: ResMut<pw_ui::UiState>,
     mut exit: MessageWriter<AppExit>,
     mut clock: ResMut<pw_render::SimClock>,
+    mut cam: Query<&mut Projection, With<pw_render::MainCamera>>,
 ) {
     let t = time.elapsed_secs();
     if let Some(s) = std::env::var("PW_AUTOSHOT_SPEED").ok().and_then(|s| s.parse().ok()) {
@@ -166,6 +168,31 @@ fn autoshot(
                 p.needs.food = 0.25;
                 p.needs.rest = 0.55;
                 ui.selected = Some(p.id);
+            }
+        }
+        // Optional: people's minds. Lonely colonists gather and chat; the first
+        // one's character window is open. PW_AUTOSHOT_MODEL=<name> hooks them to a model.
+        if std::env::var("PW_AUTOSHOT_PEOPLE").is_ok() {
+            for p in &mut g.colony.pawns {
+                p.mind.company = 0.05;
+            }
+            if let Some(p) = g.colony.pawns.first() {
+                let w = pw_game::Who { owner: 0, id: p.id };
+                ui.person = Some(w);
+                ui.show_person = true;
+                ui.follow = true;
+                if let Ok(m) = std::env::var("PW_AUTOSHOT_MODEL") {
+                    g.social.llm.cfg.model = m;
+                    g.set_hooked(w, true);
+                    ui.show_notes = std::env::var("PW_AUTOSHOT_NOTES").is_ok();
+                }
+            }
+            ui.show_chatter = true;
+            // Close enough to read the speech bubbles.
+            if let Ok(mut p) = cam.single_mut()
+                && let Projection::Orthographic(o) = p.as_mut()
+            {
+                o.scale = 0.16;
             }
         }
         // Optional: let the tribes live N days, then look at the first one.

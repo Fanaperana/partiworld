@@ -2,6 +2,7 @@
 
 mod data_editor;
 mod editor;
+mod people;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use bevy::window::PrimaryWindow;
 use bevy_egui::input::{egui_wants_any_keyboard_input, egui_wants_any_pointer_input};
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use pw_core::*;
-use pw_game::Game;
+use pw_game::{Game, Who};
 use pw_render::{GameRes, MainCamera, RenderSettings, SimClock};
 
 pub use data_editor::DataEditor;
@@ -65,6 +66,15 @@ pub struct UiState {
     /// Selected colonist (pawn id) and whether the camera follows it.
     pub selected: Option<u32>,
     pub follow: bool,
+    /// Person shown in the character window (anyone, not just colonists).
+    pub person: Option<Who>,
+    pub show_person: bool,
+    pub show_model: bool,
+    pub show_chatter: bool,
+    /// Show the notes a model is given about the chosen person.
+    pub show_notes: bool,
+    /// "Find models" was clicked.
+    finding: bool,
     /// Last build / plant choice, for the B and T hotkeys.
     pub last_build: String,
     pub last_plant: String,
@@ -98,6 +108,12 @@ impl Default for UiState {
             live_reload: true,
             selected: None,
             follow: false,
+            person: None,
+            show_person: false,
+            show_model: false,
+            show_chatter: false,
+            show_notes: false,
+            finding: false,
             last_build: "core:wall_wood".into(),
             last_plant: "core:oak_sapling".into(),
             power_radius: 6,
@@ -152,7 +168,7 @@ impl Plugin for PwUiPlugin {
             .add_systems(Update, camera_keys.run_if(not(egui_wants_any_keyboard_input)))
             .add_systems(Update, (camera_mouse, world_tools).chain().run_if(not(egui_wants_any_pointer_input)))
             .add_systems(Update, (draw_tool_preview, follow_camera, watch_mods))
-            .add_systems(EguiPrimaryContextPass, ui_panels);
+            .add_systems(EguiPrimaryContextPass, (ui_panels, people::speech_bubbles).chain());
     }
 }
 
@@ -265,6 +281,7 @@ fn camera_keys(
     if keys.just_pressed(KeyCode::Escape) {
         if ui.tool == Tool::Inspect {
             ui.selected = None;
+            ui.person = None;
             ui.follow = false;
         }
         ui.tool = Tool::Inspect;
@@ -276,7 +293,13 @@ fn camera_keys(
             ui.drag_start = None;
         }
     }
-    if keys.just_pressed(KeyCode::KeyF) && ui.selected.is_some() {
+    if keys.just_pressed(KeyCode::KeyI) {
+        ui.show_person = !ui.show_person;
+    }
+    if keys.just_pressed(KeyCode::KeyJ) {
+        ui.show_chatter = !ui.show_chatter;
+    }
+    if keys.just_pressed(KeyCode::KeyF) && (ui.selected.is_some() || ui.person.is_some()) {
         ui.follow = !ui.follow;
     }
     if keys.just_pressed(KeyCode::KeyP) {
@@ -321,9 +344,10 @@ fn follow_camera(
     if !ui.follow {
         return;
     }
-    let Some(p) = ui.selected.and_then(|id| game.0.colony.pawns.iter().find(|p| p.id == id)) else { return };
+    let who = ui.person.or(ui.selected.map(|id| Who { owner: 0, id }));
+    let Some(p) = who.and_then(|w| game.0.person(w)) else { return };
     if let Ok(mut t) = cam.single_mut() {
-        let d = clock.draw_pos(p);
+        let d = clock.draw_pos_of(who.unwrap().owner, p);
         t.translation.x = d.x;
         t.translation.y = d.y;
     }
@@ -434,7 +458,11 @@ fn world_tools(
     match tool {
         Tool::Inspect if buttons.just_pressed(MouseButton::Left) => {
             ui.selected = pawn_at(g, cur, 6.0);
-            if ui.selected.is_none() {
+            ui.person = people::person_at(g, cur, 6.0);
+            if ui.person.is_some() {
+                ui.show_person = true;
+            }
+            if ui.selected.is_none() && ui.person.is_none() {
                 ui.follow = false;
             }
         }
@@ -1013,6 +1041,17 @@ fn ui_panels(
                     st.show_tribes = !st.show_tribes;
                 }
             });
+            ui.horizontal(|ui| {
+                if ui.small_button("Character (I)").clicked() {
+                    st.show_person = !st.show_person;
+                }
+                if ui.small_button("Chatter (J)").clicked() {
+                    st.show_chatter = !st.show_chatter;
+                }
+                if ui.small_button("Model").clicked() {
+                    st.show_model = !st.show_model;
+                }
+            });
             let mut focus = None;
             for p in &g.colony.pawns {
                 ui.horizontal(|ui| {
@@ -1024,11 +1063,18 @@ fn ui_panels(
                     ui.label(egui::RichText::new(p.activity()).weak());
                     if let Some(w) = p.needs.worst() {
                         ui.label(egui::RichText::new(w).small().color(egui::Color32::from_rgb(230, 120, 90)));
+                    } else if p.mind.mood < 0.3 {
+                        ui.label(egui::RichText::new(p.mind.mood_word()).small().color(egui::Color32::from_rgb(230, 120, 90)));
+                    }
+                    if p.mind.hooked {
+                        ui.label(egui::RichText::new("model").small().color(people::MODEL));
                     }
                 });
             }
             if let Some((id, pos)) = focus {
                 st.selected = Some(id);
+                st.person = Some(Who { owner: 0, id });
+                st.show_person = true;
                 if let Ok(mut t) = cam.single_mut() {
                     t.translation.x = pos.0;
                     t.translation.y = pos.1;
@@ -1091,6 +1137,7 @@ fn ui_panels(
             let mut lines: Vec<String> = Vec::new();
             if let Some(p) = pawn_at(g, cur, 6.0).and_then(|id| g.colony.pawns.iter().find(|p| p.id == id)) {
                 lines.push(format!("{} - {}", p.name, p.activity()));
+                lines.push(format!("Feels {} ({:.0}%){}", p.mind.mood_word(), p.mind.mood * 100.0, if p.mind.hooked { ", thinking with a model" } else { "" }));
                 if g.content.creatures.by_idx(p.creature).needs.is_some() {
                     let n = &p.needs;
                     lines.push(format!(
@@ -1156,6 +1203,8 @@ fn ui_panels(
             ui.label("  God powers: paint any material, drop objects, start fires.");
             ui.label("Keys: C chop, M mine, G harvest, X cancel, Z stockpile, B build, T plant.");
             ui.label("Click a colonist to select; F follows them. P: work priorities. L: wild life and evolution. K: tribes.");
+            ui.label("Click anyone to see their mind (I): mood, friends, memories. J: what people are saying.");
+            ui.label("In the character window you can let a language model think and speak for them.");
             ui.label("Right click or Esc: back to Inspect. R: hide canopies and roofs. V: see-through roofs.");
             ui.label("F5 save, F9 load. Object editor: paint your own trees, houses and props.");
         });
@@ -1187,6 +1236,30 @@ fn ui_panels(
         if goto.is_some() {
             st.goto = goto;
         }
+    }
+
+    if st.show_person {
+        let mut open = true;
+        egui::Window::new("Character").open(&mut open).default_pos([300.0, 90.0]).default_width(300.0).show(&ctx, |ui| {
+            if st.person.is_none() {
+                ui.label("Click someone on the map to see what is on their mind.");
+            } else {
+                people::person_window(ui, g, st);
+            }
+        });
+        st.show_person = open;
+    }
+
+    if st.show_chatter {
+        let mut open = true;
+        egui::Window::new("Chatter").open(&mut open).default_pos([8.0, 330.0]).default_width(280.0).show(&ctx, |ui| people::chatter_window(ui, g, st));
+        st.show_chatter = open;
+    }
+
+    if st.show_model {
+        let mut open = true;
+        egui::Window::new("Model settings").open(&mut open).default_pos([340.0, 140.0]).show(&ctx, |ui| people::model_window(ui, g, st));
+        st.show_model = open;
     }
 
     if st.show_work {

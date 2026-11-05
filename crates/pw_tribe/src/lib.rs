@@ -152,6 +152,8 @@ pub enum TribeEvent {
     Founded { name: String },
     Discovered { tribe: String, tech: String },
     Lost { name: String },
+    /// One of its people died (`how`: "starved", "died of old age"...).
+    Died { tribe: String, name: String, how: String },
     /// A band wants to leave and settle elsewhere; the game finds the land.
     Split { from: u32, pawns: Vec<Pawn>, members: Vec<Member>, food: Vec<(usize, u32)> },
     Colony(ColonyEvent),
@@ -561,7 +563,9 @@ impl Tribe {
         deaths.sort();
         deaths.dedup_by_key(|d| d.0);
         for (pawn, how) in deaths {
-            self.lose(world, content, rng, pawn, how, day);
+            if let Some(name) = self.lose(world, content, rng, pawn, how, day) {
+                events.push(TribeEvent::Died { tribe: self.name.clone(), name, how: how.to_string() });
+            }
         }
         if self.members.is_empty() && self.gone.is_none() {
             self.gone = Some(env.tick);
@@ -575,13 +579,15 @@ impl Tribe {
         split
     }
 
-    fn lose(&mut self, world: &mut World, content: &Content, rng: &mut Rng, pawn: u32, how: &str, day: u64) {
-        if let Some(p) = self.colony.remove_pawn(world, content, rng, pawn) {
-            self.note(day, format!("{} {how}.", p.name));
+    fn lose(&mut self, world: &mut World, content: &Content, rng: &mut Rng, pawn: u32, how: &str, day: u64) -> Option<String> {
+        let name = self.colony.remove_pawn(world, content, rng, pawn).map(|p| p.name);
+        if let Some(n) = &name {
+            self.note(day, format!("{n} {how}."));
         }
         self.members.retain(|m| m.pawn != pawn);
         self.hunts.retain(|h| h.pawn != pawn);
         self.died += 1;
+        name
     }
 
     /// Nights are spent at home; people who wandered off come back.
@@ -629,7 +635,9 @@ impl Tribe {
                 return false;
             };
             if dist(pawn.pos, ppos) <= TILE as f32 * 1.7 {
-                if rng.chance((0.22 * bold).clamp(0.05, 0.6)) {
+                // The tribe's boldness, and this hunter's own nerve.
+                let nerve = 0.7 + pawn.mind.persona.brave * 0.6;
+                if rng.chance((0.22 * bold * nerve).clamp(0.05, 0.6)) {
                     life.kill(h.prey, Death::Hunted);
                     caught.push((pawn.name.clone(), pawn.tile(), pdef));
                     pawn.job = None;
@@ -808,7 +816,16 @@ impl Tribe {
         if !self.hunts.is_empty() {
             return false;
         }
-        let Some(pawn) = self.colony.pawns.iter().find(|p| p.job.as_ref().is_none_or(|j| j.label == "Wandering")) else { return false };
+        // The bravest of those free to go.
+        let Some(pawn) = self
+            .colony
+            .pawns
+            .iter()
+            .filter(|p| p.job.as_ref().is_none_or(|j| j.label == "Wandering"))
+            .max_by(|a, b| a.mind.persona.brave.total_cmp(&b.mind.persona.brave))
+        else {
+            return false;
+        };
         let reach = (self.radius + 8) as f32 * TILE as f32;
         let (cx, cy) = self.center.center();
         let prey = life

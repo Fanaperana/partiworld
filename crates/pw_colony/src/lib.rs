@@ -2,6 +2,7 @@
 //! Job kinds are data (`JobDef`) pointing at built-in drivers, so a mod can add
 //! e.g. "cut flowers" as a Fell job targeting the `flower` tag.
 
+pub mod mind;
 pub mod path;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -11,6 +12,7 @@ use pw_objects as objs;
 use pw_world::*;
 use serde::{Deserialize, Serialize};
 
+pub use mind::{Intent, Mind, Persona};
 pub use path::{find_nearest, find_path, nearest_tile};
 
 /// Simulation ticks per second at 1x speed.
@@ -175,6 +177,8 @@ pub enum JobKind {
     Sleep { bed: Option<ObjId>, at: TilePos },
     /// Stand somewhere warm until warmed up.
     Warm { at: TilePos },
+    /// Stay put for a while: chatting, resting, sulking.
+    Linger { ticks: u32 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -206,6 +210,9 @@ pub struct Pawn {
     pub work: BTreeMap<String, u8>,
     #[serde(default)]
     pub needs: Needs,
+    /// Personality, mood, memories and opinions of others.
+    #[serde(default)]
+    pub mind: Mind,
 }
 
 /// How a colonist is doing. Each value is 0..1: 1 = fully met, 0 = in danger.
@@ -369,8 +376,35 @@ impl Pawn {
         if self.needs.health < 0.5 {
             p *= 0.8;
         }
+        if self.mind.mood < 0.2 {
+            p *= 0.85;
+        }
         p
     }
+    /// Work speed from personality and mood.
+    pub fn work_rate(&self) -> f32 {
+        self.mind.work_rate()
+    }
+    /// Busy with a need (eating, sleeping, warming up): don't interrupt.
+    pub fn tending_need(&self) -> bool {
+        self.job.as_ref().is_some_and(|j| matches!(j.kind, JobKind::Eat { .. } | JobKind::Sleep { .. } | JobKind::Warm { .. }))
+    }
+    /// Idle, wandering or lingering: free to chat.
+    pub fn at_leisure(&self) -> bool {
+        self.job.as_ref().is_none_or(|j| matches!(j.kind, JobKind::Wander { .. } | JobKind::Linger { .. }))
+    }
+}
+
+/// Something one person is told to do (see `Colony::order`).
+#[derive(Clone, Debug)]
+pub enum Order {
+    /// Drop idle plans and pick up work.
+    Work,
+    Eat,
+    Sleep,
+    Warm,
+    Walk { to: TilePos, label: String },
+    Linger { ticks: u32, label: String },
 }
 
 /// Things the game turns into script hooks.
@@ -497,6 +531,7 @@ impl Colony {
             .map(|(k, v)| (k.clone(), if v.is_empty() { "#ff00ff".into() } else { v[rng.below(v.len())].clone() }))
             .collect();
         let (x, y) = tile.center();
+        let mind = Mind::from_seed(hash3(self.next_pawn as u64 ^ (creature as u64) << 32, tile.x as i64, tile.y as i64, hash_str(&name) as i64));
         self.pawns.push(Pawn {
             id: self.next_pawn,
             name,
@@ -504,6 +539,7 @@ impl Colony {
             slots,
             pos: (x, y),
             think: rng.below(20) as u32,
+            mind,
             ..Default::default()
         });
         self.next_pawn
@@ -665,6 +701,48 @@ impl Colony {
         Ok(())
     }
 
+    // ------------------------------------------------------------ orders to one person
+
+    /// Tell one person what to do now (from the social system or a model).
+    /// Returns false if it couldn't be done (no food, nowhere to go...).
+    pub fn order(&mut self, world: &mut World, content: &Content, rng: &mut Rng, env: &NeedsEnv, pawn: u32, order: Order) -> bool {
+        let Some(i) = self.pawns.iter().position(|p| p.id == pawn) else { return false };
+        let mut p = std::mem::take(&mut self.pawns[i]);
+        let mut events = Vec::new();
+        let mut ctx = Ctx { world, content, rng, events: &mut events, walk: 1.0 };
+        let job = match order {
+            Order::Work => {
+                if p.at_leisure() && p.job.is_some() {
+                    self.end_job(&mut p, &mut ctx, true);
+                }
+                p.think = 0;
+                self.pawns[i] = p;
+                return true;
+            }
+            Order::Eat => self.find_food(&mut p, &mut ctx),
+            Order::Sleep => self.find_bed(&mut p, &mut ctx, env),
+            Order::Warm => {
+                let low = content.creatures.by_idx(p.creature).needs.as_ref().map(|n| n.comfort.0).unwrap_or(10.0);
+                self.find_warmth(&mut p, &mut ctx, env, low)
+            }
+            Order::Walk { to, label } => {
+                let dest = if ctx.world.walkable(to) { Some(to) } else { nearest_tile(to, 3, |t| ctx.world.walkable(t)) };
+                dest.map(|dest| Job { kind: JobKind::Wander { dest }, stage: 0, timer: 0.0, label })
+            }
+            Order::Linger { ticks, label } => Some(Job { kind: JobKind::Linger { ticks }, stage: 0, timer: 0.0, label }),
+        };
+        let ok = job.is_some();
+        if let Some(job) = job {
+            // The search may have reserved things; drop the old job first but keep the new path.
+            let path = std::mem::take(&mut p.path);
+            self.end_job(&mut p, &mut ctx, false);
+            p.path = path;
+            p.job = Some(job);
+        }
+        self.pawns[i] = p;
+        ok
+    }
+
     // ------------------------------------------------------------ simulation
 
     /// `walk` scales walking speed (snow).
@@ -731,14 +809,19 @@ impl Colony {
             }
             if pawn.job.is_none() {
                 pawn.job = self.find_job(pawn, ctx);
+                if let Some(j) = &pawn.job {
+                    pawn.mind.last_work = j.label.clone();
+                }
             }
             if pawn.job.is_none() {
                 // Nothing to do: look again a bit later (searching is the costly part).
                 pawn.think = 30;
-                if ctx.rng.chance(0.08) {
+                if ctx.rng.chance(0.05 + pawn.mind.persona.curious * 0.06) {
                     let start = pawn.tile();
-                    let dx = ctx.rng.range_i32(-5, 5);
-                    let dy = ctx.rng.range_i32(-5, 5);
+                    // Curious people roam further.
+                    let r = 4 + (pawn.mind.persona.curious * 10.0) as i32;
+                    let dx = ctx.rng.range_i32(-r, r);
+                    let dy = ctx.rng.range_i32(-r, r);
                     let dest = start.offset(dx, dy);
                     if ctx.world.walkable(dest) {
                         pawn.job = Some(Job { kind: JobKind::Wander { dest }, stage: 0, timer: 0.0, label: "Wandering".into() });
@@ -782,13 +865,14 @@ impl Colony {
                         }
                     }
                 }
-                JobKind::Wander { .. } | JobKind::Sleep { .. } | JobKind::Warm { .. } => {}
+                JobKind::Wander { .. } | JobKind::Sleep { .. } | JobKind::Warm { .. } | JobKind::Linger { .. } => {}
                 JobKind::Eat { stack } => self.unreserve_stack(stack, pawn.id),
             }
         }
         pawn.path.clear();
         // Anything still carried is stored (or dropped) on the next think.
-        pawn.think = 0;
+        // Lazy people take a short breather between jobs.
+        pawn.think = ((1.0 - pawn.mind.persona.diligent) * 24.0) as u32;
     }
 
     fn cost_index(content: &Content, def: usize, item: usize) -> Option<usize> {
@@ -1159,6 +1243,11 @@ impl Colony {
             JobKind::Eat { stack } => self.run_eat(pawn, ctx, *stack, job.stage),
             JobKind::Sleep { bed, at } => Self::run_sleep(pawn, ctx, *bed, *at, job.stage),
             JobKind::Warm { at } => Self::run_warm(pawn, ctx, *at, job.stage),
+            JobKind::Linger { ticks } => {
+                let t = Self::timer(pawn);
+                *t += 1.0;
+                if *t >= *ticks as f32 { Step::Done } else { Step::Continue }
+            }
         };
         step
     }
@@ -1561,7 +1650,8 @@ impl Colony {
                     self.designations.remove(&at);
                     return Step::Done;
                 };
-                *Self::timer(pawn) += 1.0;
+                let r = pawn.work_rate();
+                *Self::timer(pawn) += r;
                 while pawn.job.as_ref().unwrap().timer >= speed {
                     *Self::timer(pawn) -= speed;
                     if objs::chip(ctx.world, ctx.content, o, ctx.rng, None).is_none() {
@@ -1602,7 +1692,8 @@ impl Colony {
                     self.designations.remove(&at);
                     return Step::Done;
                 };
-                *Self::timer(pawn) += 1.0;
+                let r = pawn.work_rate();
+                *Self::timer(pawn) += r;
                 if pawn.job.as_ref().unwrap().timer >= speed {
                     *Self::timer(pawn) = 0.0;
                     match objs::pluck(ctx.world, ctx.content, o, ctx.rng) {
@@ -1629,7 +1720,8 @@ impl Colony {
                 };
                 let m = ctx.world.get(x, y, Layer::Solid);
                 let need = speed * ctx.content.mat_rt(m).hardness;
-                *Self::timer(pawn) += 1.0;
+                let r = pawn.work_rate();
+                *Self::timer(pawn) += r;
                 if pawn.job.as_ref().unwrap().timer >= need {
                     *Self::timer(pawn) = 0.0;
                     // Take a small cluster so mining reads as digging.
@@ -1647,7 +1739,8 @@ impl Colony {
                 Step::Continue
             }
             (JobDriver::Plant, DesTarget::Plant(def)) => {
-                *Self::timer(pawn) += 1.0;
+                let r = pawn.work_rate();
+                *Self::timer(pawn) += r;
                 if pawn.job.as_ref().unwrap().timer >= 45.0 * speed {
                     let def = *def;
                     let origin = match ctx.content.protos[def].anchor {
