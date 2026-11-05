@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/Fanaperana/partiworld/security/advisories/new
+    about: Please report security problems privately, not in a public issue.
+  - name: How to contribute
+    url: https://github.com/Fanaperana/partiworld/blob/main/CONTRIBUTING.md
+    about: Setting up, code style, content, art and pull requests.

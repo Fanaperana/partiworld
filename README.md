@@ -268,6 +268,12 @@ Tools for testing:
 
 Next on the list: hunting and taming, cooking and crafting, farming zones, clothes for the cold, trade and diplomacy with tribes.
 
+## Contributing
+
+Help is welcome: code, new content and mods, pixel art, bug reports and ideas. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to get set up, the code style, and how to send a pull request. Bugs and ideas go in [issues](https://github.com/Fanaperana/partiworld/issues).
+
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Please report security problems privately, as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
 Dual-licensed under either of

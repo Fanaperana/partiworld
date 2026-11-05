@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in the game doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please check the [open issues](https://github.com/Fanaperana/partiworld/issues) first in case it's already known.
+        Security problems go through the [Security tab](https://github.com/Fanaperana/partiworld/security) instead, not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What went wrong, and what did you expect instead?
+      placeholder: Colonists stop hauling wood once the stockpile is half full, but there is still room.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The steps, as exact as you can make them.
+      placeholder: |
+        1. Start with seed 1337
+        2. Make a 4x4 stockpile next to the trees
+        3. Mark 10 trees to chop
+        4. Wait until the stockpile is half full
+    validations:
+      required: true
+  - type: input
+    id: seed
+    attributes:
+      label: World seed
+      description: The number after `cargo run --release --`, or "default".
+      placeholder: "1337"
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots, saves or logs
+      description: Drag in screenshots or a short clip. A save file (from the `saves` folder) or the terminal output is very helpful for crashes.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit you're on (`git rev-parse --short HEAD`) or the date you downloaded it.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Operating system and graphics card.
+      placeholder: Windows 11, NVIDIA RTX 3060
+  - type: input
+    id: mods
+    attributes:
+      label: Mods
+      description: Any mods you have besides the ones that come with the game.
