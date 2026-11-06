@@ -4,6 +4,9 @@
     ItemDef(id: "core:iron", name: "Iron ore", color: "#a06f58", tags: ["material"]),
     ItemDef(id: "core:gold", name: "Gold", color: "#e0b83a", tags: ["material", "valuable"]),
     ItemDef(id: "core:berries", name: "Berries", color: "#b82a46", tags: ["food"], nutrition: 0.3),
-    ItemDef(id: "core:meat", name: "Meat", color: "#a83c34", tags: ["food"], nutrition: 0.6),
+    ItemDef(id: "core:meat", name: "Raw meat", color: "#a83c34", tags: ["food", "raw"], nutrition: 0.4),
+    // Cooked at a campfire: more filling, and eaten first.
+    ItemDef(id: "core:roast", name: "Roast meat", color: "#7a4424", tags: ["food", "meal"], nutrition: 0.9),
+    ItemDef(id: "core:berry_cake", name: "Berry cake", color: "#c4566a", tags: ["food", "meal"], nutrition: 0.6),
     ItemDef(id: "core:hide", name: "Hide", color: "#8c6a48", tags: ["material"]),
 ]

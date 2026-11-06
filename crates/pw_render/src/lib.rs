@@ -899,6 +899,9 @@ fn pawn_pose(p: &pw_colony::Pawn, moving: bool, facing: usize, t: f32) -> Option
         Some(J::Work { .. } | J::Construct { .. }) if arrived => {
             return Some(if beat(t, 2.5) % 2 == 0 { "work" } else { "idle" });
         }
+        Some(J::Cook { .. }) if arrived && p.job.as_ref().is_some_and(|j| j.stage >= 2) => {
+            return Some(if beat(t, 2.5) % 2 == 0 { "work" } else { "idle" });
+        }
         _ => {}
     }
     if p.needs.health < 0.3 {
@@ -1274,6 +1277,13 @@ fn draw_zones(game: Res<GameRes>, settings: Res<RenderSettings>, mut gizmos: Giz
         for t in &tr.colony.stockpile {
             let (x, y) = t.center();
             gizmos.rect_2d(Isometry2d::from_translation(Vec2::new(x, y)), size, Color::srgba_u8(c[0], c[1], c[2], 50));
+        }
+    }
+    // Animals marked for hunting: a ring in the hunt order's colour.
+    let hunt = g.content.jobs.iter().find(|(_, j)| j.driver == JobDriver::Hunt).and_then(|(_, j)| parse_color(&j.color)).unwrap_or([255, 64, 48, 255]);
+    for id in &g.colony.hunt_marks {
+        if let Some(c) = g.life.get(*id) {
+            gizmos.circle_2d(Isometry2d::from_translation(Vec2::new(c.pos.0, c.pos.1)), TILE as f32 * 0.8, Color::srgba_u8(hunt[0], hunt[1], hunt[2], 220));
         }
     }
     for (t, d) in &g.colony.designations {

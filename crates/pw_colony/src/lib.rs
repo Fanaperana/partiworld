@@ -177,6 +177,8 @@ pub enum JobKind {
     Sleep { bed: Option<ObjId>, at: TilePos },
     /// Stand somewhere warm until warmed up.
     Warm { at: TilePos },
+    /// Fetch a recipe's input from `stack`, carry it to `station` and make it there.
+    Cook { recipe: usize, station: ObjId, stack: u32 },
     /// Stay put for a while: chatting, resting, sulking.
     Linger { ticks: u32 },
 }
@@ -269,8 +271,8 @@ pub struct NeedsEnv {
     pub temp: f32,
     pub wind: f32,
     pub wet: f32,
-    /// Other peoples' land (centre, radius in tiles): their beds are not ours.
-    pub keep_out: Vec<(TilePos, i32)>,
+    /// Other peoples' buildings: their beds are not ours.
+    pub keep_out: Vec<TileRect>,
 }
 
 /// Ticks between needs updates.
@@ -430,6 +432,12 @@ pub struct Colony {
     /// When each kind of needs warning was last given (so they aren't repeated).
     #[serde(default)]
     pub warned_at: [u64; 2],
+    /// Animals (life creature ids) marked for hunting.
+    #[serde(default)]
+    pub hunt_marks: BTreeSet<u32>,
+    /// Who is hunting what: pawn id -> creature id.
+    #[serde(default)]
+    pub hunters: BTreeMap<u32, u32>,
 }
 
 enum Step {
@@ -600,7 +608,8 @@ impl Colony {
                     }
                 }
             }
-            JobDriver::Haul | JobDriver::Construct => {}
+            // Hunting marks animals (done by the game, which knows them); cooking needs no orders.
+            JobDriver::Haul | JobDriver::Construct | JobDriver::Hunt | JobDriver::Cook => {}
         }
         added
     }
@@ -867,6 +876,7 @@ impl Colony {
                 }
                 JobKind::Wander { .. } | JobKind::Sleep { .. } | JobKind::Warm { .. } | JobKind::Linger { .. } => {}
                 JobKind::Eat { stack } => self.unreserve_stack(stack, pawn.id),
+                JobKind::Cook { stack, .. } => self.unreserve_stack(stack, pawn.id),
             }
         }
         pawn.path.clear();
@@ -985,6 +995,9 @@ impl Colony {
             let found = match jd.driver {
                 JobDriver::Haul => self.find_haul(pawn, ctx, here),
                 JobDriver::Construct => self.find_construct(pawn, ctx, here),
+                JobDriver::Cook => self.find_cook(pawn, ctx, &jd.id),
+                // Hunters are sent by the game, which knows where the animals are.
+                JobDriver::Hunt => None,
                 _ => self.find_designation(pawn, ctx, ji, here),
             };
             if found.is_some() {
@@ -1243,6 +1256,7 @@ impl Colony {
             JobKind::Eat { stack } => self.run_eat(pawn, ctx, *stack, job.stage),
             JobKind::Sleep { bed, at } => Self::run_sleep(pawn, ctx, *bed, *at, job.stage),
             JobKind::Warm { at } => Self::run_warm(pawn, ctx, *at, job.stage),
+            JobKind::Cook { recipe, station, stack } => self.run_cook(pawn, ctx, *recipe, *station, *stack, job.stage),
             JobKind::Linger { ticks } => {
                 let t = Self::timer(pawn);
                 *t += 1.0;
@@ -1462,19 +1476,141 @@ impl Colony {
     }
 
     fn find_food(&mut self, pawn: &mut Pawn, ctx: &mut Ctx) -> Option<Job> {
-        let goals: HashMap<TilePos, u32> = self
-            .items
-            .stacks
-            .values()
-            .filter(|s| s.reserved.is_none() && ctx.content.items.by_idx(s.item).nutrition > 0.0)
-            .map(|s| (s.tile, s.id))
-            .collect();
-        let hint = goals.keys().min_by_key(|t| t.manhattan(pawn.tile())).copied()?;
-        let id = Self::search(pawn, ctx, &goals, |_, _| true, hint)?;
+        // Cooked meals first, raw food only when there are none.
+        let mut id = None;
+        for meals_only in [true, false] {
+            let goals: HashMap<TilePos, u32> = self
+                .items
+                .stacks
+                .values()
+                .filter(|s| {
+                    let d = ctx.content.items.by_idx(s.item);
+                    s.reserved.is_none() && d.nutrition > 0.0 && (!meals_only || d.tags.iter().any(|t| t == "meal"))
+                })
+                .map(|s| (s.tile, s.id))
+                .collect();
+            let Some(hint) = goals.keys().min_by_key(|t| t.manhattan(pawn.tile())).copied() else { continue };
+            id = Self::search(pawn, ctx, &goals, |_, _| true, hint);
+            if id.is_some() {
+                break;
+            }
+        }
+        let id = id?;
         let s = self.items.stacks.get_mut(&id)?;
         s.reserved = Some(pawn.id);
         let name = ctx.content.items.by_idx(s.item).name.clone();
         Some(Job { kind: JobKind::Eat { stack: id }, stage: 0, timer: 0.0, label: format!("Eating {}", name.to_lowercase()) })
+    }
+
+    /// Cook something the colony is short of, if there is a station and food to cook.
+    fn find_cook(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, job: &str) -> Option<Job> {
+        let here = pawn.tile();
+        // Everyone who eats, including this cook (who is out of the list while thinking).
+        let eaters = 1 + self.pawns.iter().filter(|p| ctx.content.creatures.by_idx(p.creature).needs.is_some()).count();
+        for (ri, r) in ctx.content.recipes.iter() {
+            if r.job != job {
+                continue;
+            }
+            let (Some(input), Some(output)) = (ctx.content.items.idx(&r.input.0), ctx.content.items.idx(&r.output.0)) else { continue };
+            // Count what is in store plus what others are cooking right now.
+            let cooking: u32 = self
+                .pawns
+                .iter()
+                .filter(|p| matches!(&p.job, Some(Job { kind: JobKind::Cook { recipe, .. }, .. }) if *recipe == ri))
+                .map(|_| r.output.1)
+                .sum();
+            if (self.items.total(output) + cooking) as f32 >= r.keep * eaters as f32 {
+                continue;
+            }
+            // The nearest station.
+            let area = TileRect::from_corners(here.offset(-40, -40), here.offset(40, 40));
+            let station = ctx
+                .world
+                .objects_in_rect(area)
+                .into_iter()
+                .filter_map(|o| ctx.world.objects.get(o).map(|i| (o, i)))
+                .filter(|(_, i)| i.built && ctx.content.protos[i.def].tags.iter().any(|t| r.station.contains(t)))
+                .min_by_key(|(_, i)| tile_of(i.min.0, i.min.1).manhattan(here))
+                .map(|(o, _)| o);
+            let Some(station) = station else { continue };
+            let goals: HashMap<TilePos, u32> = self
+                .items
+                .stacks
+                .values()
+                .filter(|s| s.item == input && s.reserved.is_none() && s.count >= r.input.1)
+                .map(|s| (s.tile, s.id))
+                .collect();
+            let Some(hint) = goals.keys().min_by_key(|t| t.manhattan(here)).copied() else { continue };
+            let Some(stack) = Self::search(pawn, ctx, &goals, |_, _| true, hint) else { continue };
+            if let Some(s) = self.items.stacks.get_mut(&stack) {
+                s.reserved = Some(pawn.id);
+            }
+            return Some(Job { kind: JobKind::Cook { recipe: ri, station, stack }, stage: 0, timer: 0.0, label: format!("Cooking {}", r.name.to_lowercase()) });
+        }
+        None
+    }
+
+    fn run_cook(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, recipe: usize, station: ObjId, stack: u32, stage: u8) -> Step {
+        let Some(r) = ctx.content.recipes.try_idx(recipe) else { return Step::Fail("no such recipe") };
+        let Some(inst) = ctx.world.objects.get(station) else { return Step::Fail("station gone") };
+        let st = tile_of((inst.min.0 + inst.max.0) / 2, (inst.min.1 + inst.max.1) / 2);
+        let blocks = ctx.content.protos[inst.def].blocks;
+        match stage {
+            // Fetch the ingredients.
+            0 => {
+                let Some(s) = self.items.get(stack) else { return Step::Fail("food gone") };
+                let tile = s.tile;
+                match Self::follow(pawn, ctx, move |t| t == tile, tile) {
+                    Ok(true) => {
+                        let Some(input) = ctx.content.items.idx(&r.input.0) else { return Step::Fail("no such item") };
+                        let got = self.items.take(stack, r.input.1);
+                        if got < r.input.1 {
+                            if got > 0 {
+                                self.items.add(ctx.world, ctx.content, input, got, tile);
+                            }
+                            return Step::Fail("not enough food");
+                        }
+                        pawn.carrying = Some((input, got));
+                        self.set_stage(pawn, 1);
+                        Step::Continue
+                    }
+                    Ok(false) => Step::Continue,
+                    Err(()) => Step::Fail("no path"),
+                }
+            }
+            // Carry them to the station.
+            1 => match Self::follow(pawn, ctx, near(st, blocks), st) {
+                Ok(true) => {
+                    self.set_stage(pawn, 2);
+                    Step::Continue
+                }
+                Ok(false) => Step::Continue,
+                Err(()) => Step::Fail("no path"),
+            },
+            // Cook.
+            _ => {
+                let t = Self::timer(pawn);
+                *t += 1.0;
+                if *t < r.work * TPS {
+                    return Step::Continue;
+                }
+                pawn.carrying = None;
+                if let Some(out) = ctx.content.items.idx(&r.output.0) {
+                    self.items.add(ctx.world, ctx.content, out, r.output.1, pawn.tile());
+                }
+                Step::Done
+            }
+        }
+    }
+
+    /// Stop what a pawn is doing (its reservations are let go), e.g. to send it hunting.
+    pub fn interrupt(&mut self, world: &mut World, content: &Content, rng: &mut Rng, id: u32) {
+        let Some(i) = self.pawns.iter().position(|p| p.id == id) else { return };
+        let mut pawn = std::mem::take(&mut self.pawns[i]);
+        let mut events = Vec::new();
+        let mut ctx = Ctx { world, content, rng, events: &mut events, walk: 1.0 };
+        self.end_job(&mut pawn, &mut ctx, false);
+        self.pawns[i] = pawn;
     }
 
     /// The nearest free bed, or else a sheltered spot on the ground.
@@ -1497,7 +1633,7 @@ impl Colony {
                 continue;
             }
             let t = tile_of((inst.min.0 + inst.max.0) / 2, (inst.min.1 + inst.max.1) / 2);
-            if env.keep_out.iter().any(|&(c, r)| c.chebyshev(t) <= r) {
+            if env.keep_out.iter().any(|r| r.contains(t)) {
                 continue;
             }
             for s in stand_tiles(t, false) {

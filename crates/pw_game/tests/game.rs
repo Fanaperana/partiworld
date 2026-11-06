@@ -709,6 +709,7 @@ fn every_definition_can_be_edited_as_text() {
     roundtrip(&c.creatures);
     roundtrip(&c.powers);
     roundtrip(&c.tribes);
+    roundtrip(&c.recipes);
     let _: ClimateDef = pw_mods::parse_ron(&pw_mods::to_ron(&c.climate).unwrap()).unwrap();
     let _: WorldGenDef = pw_mods::parse_ron(&pw_mods::to_ron(&c.worldgen).unwrap()).unwrap();
 }
@@ -979,4 +980,45 @@ fn cold_colonists_warm_up_by_a_fire() {
     let p = g.colony.pawns.iter().find(|p| p.id == id).unwrap();
     assert!(warmed, "cold colonist did not warm up: {} warmth {:.2} felt {:.0}", p.activity(), p.needs.warmth, p.needs.felt);
     assert!(p.tile().chebyshev(ft) <= 4, "should have gone to the fire");
+}
+
+#[test]
+fn colonists_hunt_marked_animals() {
+    let mut g = new_game(31);
+    fixed_climate(&mut g, 20.0);
+    let home = g.spawn_tile();
+    let c = g.content.clone();
+    let meat = c.items.idx("core:meat").unwrap();
+    let before = g.colony.items.total(meat);
+    g.spawn_group("core:rabbit", home.offset(7, 2), 3);
+    let marked = g.designate("core:hunt", TileRect::from_corners(home.offset(-2, -6), home.offset(16, 10)), None);
+    assert!(marked >= 3, "rabbits should be marked: {marked}");
+    let caught = run(&mut g, DAY_TICKS as u32, |g| g.log.iter().any(|m| m.contains("hunted a rabbit")));
+    assert!(caught, "no rabbit hunted: {:?}", g.colony.pawns.iter().map(|p| p.activity().to_string()).collect::<Vec<_>>());
+    assert!(g.colony.items.total(meat) > before, "the meat should come home");
+    // Cancelling forgets the marks.
+    g.cancel(TileRect::from_corners(home.offset(-60, -60), home.offset(60, 60)));
+    assert!(g.colony.hunt_marks.is_empty());
+}
+
+#[test]
+fn cooks_roast_meat_at_a_campfire_and_meals_are_eaten_first() {
+    let mut g = new_game(32);
+    fixed_climate(&mut g, 20.0);
+    let home = g.spawn_tile();
+    clear_area(&mut g, home.offset(-6, -6), home.offset(6, 6));
+    let c = g.content.clone();
+    let fire = c.objects.idx("core:campfire").unwrap();
+    pw_objects::place(&mut g.world, &c, fire, home.offset(3, 3).origin(), 1, true);
+    g.world.rebuild_tiles(&c);
+    let roast = c.items.idx("core:roast").unwrap();
+    let cooked = run(&mut g, (DAY_TICKS / 2) as u32, |g| g.colony.items.total(roast) >= 2);
+    assert!(cooked, "nobody cooked: {:?}", g.colony.pawns.iter().map(|p| p.activity().to_string()).collect::<Vec<_>>());
+    // A hungry colonist picks the cooked meal over raw food.
+    let id = g.colony.pawns[0].id;
+    g.colony.pawns[0].needs.food = 0.1;
+    let ate = run(&mut g, 600, |g| {
+        g.colony.pawns.iter().find(|p| p.id == id).is_some_and(|p| p.activity().starts_with("Eating") && !p.activity().contains("raw"))
+    });
+    assert!(ate, "should eat a meal: {}", g.colony.pawns.iter().find(|p| p.id == id).unwrap().activity());
 }

@@ -7,6 +7,8 @@
     JobDef(id: "core:quarry", label: "Break rocks", driver: Fell, targets: ["rock"], priority: 48, color: "#c0c0c0", speed: 2.0),
     JobDef(id: "core:plant", label: "Plant", driver: Plant, targets: ["soil"], priority: 55, color: "#60e0a0", speed: 1.0),
     JobDef(id: "core:deconstruct", label: "Deconstruct", driver: Deconstruct, priority: 55, color: "#ff6040", speed: 1.0),
+    JobDef(id: "core:hunt", label: "Hunt", driver: Hunt, targets: ["prey", "predator"], priority: 52, color: "#ff4030", speed: 1.0),
+    JobDef(id: "core:cook", label: "Cook", driver: Cook, priority: 58, designatable: false),
     JobDef(id: "core:construct", label: "Construct", driver: Construct, priority: 65, designatable: false),
     JobDef(id: "core:haul", label: "Haul", driver: Haul, priority: 30, designatable: false),
 ]

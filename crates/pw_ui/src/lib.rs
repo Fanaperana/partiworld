@@ -1156,6 +1156,9 @@ fn ui_panels(
             if let Some(c) = g.life.at((cur.x, cur.y), 6.0) {
                 let sp = g.life.species_of(c.species).map(|s| s.name.clone()).unwrap_or_default();
                 lines.push(format!("{sp} - {}", c.activity()));
+                if g.colony.hunt_marks.contains(&c.id) {
+                    lines.push("Marked for hunting".into());
+                }
                 lines.push(format!(
                     "{:.1} days old, generation {}, {} young, {} kills",
                     c.age as f32 / pw_game::DAY_TICKS as f32,

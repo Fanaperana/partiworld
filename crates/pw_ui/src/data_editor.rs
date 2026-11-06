@@ -20,17 +20,19 @@ pub enum Kind {
     Creatures,
     Powers,
     Tribes,
+    Recipes,
     Climate,
     Worldgen,
 }
 
-const KINDS: [Kind; 11] = [
+const KINDS: [Kind; 12] = [
     Kind::Materials,
     Kind::Objects,
     Kind::Reactions,
     Kind::Creatures,
     Kind::Powers,
     Kind::Tribes,
+    Kind::Recipes,
     Kind::Climate,
     Kind::Biomes,
     Kind::Items,
@@ -50,6 +52,7 @@ impl Kind {
             Kind::Creatures => "Creatures",
             Kind::Powers => "Powers",
             Kind::Tribes => "Tribes",
+            Kind::Recipes => "Recipes",
             Kind::Climate => "Climate",
             Kind::Worldgen => "World gen",
         }
@@ -66,6 +69,7 @@ impl Kind {
             Kind::Creatures => Some("creatures"),
             Kind::Powers => Some("powers"),
             Kind::Tribes => Some("tribes"),
+            Kind::Recipes => Some("recipes"),
             Kind::Climate | Kind::Worldgen => None,
         }
     }
@@ -115,6 +119,7 @@ impl DataEditor {
             Kind::Creatures => ids(&c.creatures),
             Kind::Powers => ids(&c.powers),
             Kind::Tribes => ids(&c.tribes),
+            Kind::Recipes => ids(&c.recipes),
             Kind::Climate => vec!["climate".into()],
             Kind::Worldgen => vec!["worldgen".into()],
         }
@@ -131,6 +136,7 @@ impl DataEditor {
             Kind::Creatures => text_of(&c.creatures, id),
             Kind::Powers => text_of(&c.powers, id),
             Kind::Tribes => text_of(&c.tribes, id),
+            Kind::Recipes => text_of(&c.recipes, id),
             Kind::Climate => pw_mods::to_ron(&c.climate).unwrap_or_default(),
             Kind::Worldgen => pw_mods::to_ron(&c.worldgen).unwrap_or_default(),
         };
@@ -151,6 +157,7 @@ impl DataEditor {
             Kind::Creatures => put(&mut c.creatures, &self.text)?,
             Kind::Powers => put(&mut c.powers, &self.text)?,
             Kind::Tribes => put(&mut c.tribes, &self.text)?,
+            Kind::Recipes => put(&mut c.recipes, &self.text)?,
             Kind::Climate => {
                 c.climate = pw_mods::parse_ron(&self.text)?;
                 "climate".into()

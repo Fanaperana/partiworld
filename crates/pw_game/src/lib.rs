@@ -31,6 +31,8 @@ pub const MODEL_CONFIG: &str = "saves/model.json";
 
 /// Ticks in one in-game day.
 pub const DAY_TICKS: u64 = 30 * 60 * 6;
+/// Job label prefix of colonists out hunting.
+const HUNTING: &str = "Hunting";
 
 /// A Rust mod. Register extra per-tick systems or script functions here.
 pub trait PwPlugin: Send + Sync {
@@ -286,6 +288,7 @@ impl Game {
         };
         let tribe_events = self.tribes.tick(&mut self.world, &content, &mut self.rng, &tribe_env, &mut self.life);
         self.handle_tribes(tribe_events);
+        self.hunt();
         self.social_tick();
         if self.tick % DAY_TICKS == DAY_TICKS / 2 {
             self.migrate();
@@ -414,7 +417,7 @@ impl Game {
             temp: self.env.temp,
             wind: self.env.wind,
             wet: self.env.precip,
-            keep_out: self.tribes.living().map(|t| (t.center, t.radius as i32 + 2)).collect(),
+            keep_out: self.tribes.living().flat_map(|t| t.projects.iter().map(|p| p.rect())).collect(),
         }
     }
 
@@ -534,11 +537,26 @@ impl Game {
 
     pub fn designate(&mut self, job: &str, rect: TileRect, plant: Option<&str>) -> usize {
         let Some(j) = self.content.jobs.idx(job) else { return 0 };
+        let jd = self.content.jobs.by_idx(j);
+        if jd.driver == JobDriver::Hunt {
+            // Mark the animals in the box (their life tags must match the job's targets).
+            let mut n = 0;
+            for c in &self.life.creatures {
+                let tags = self.content.creatures.by_idx(c.def).life.as_ref().map(|l| l.tags.clone()).unwrap_or_default();
+                let fits = jd.targets.is_empty() || jd.targets.iter().any(|t| tags.contains(t));
+                if c.dead.is_none() && fits && rect.contains(c.tile()) && self.colony.hunt_marks.insert(c.id) {
+                    n += 1;
+                }
+            }
+            return n;
+        }
         let plant = plant.and_then(|p| self.content.objects.idx(p));
         self.colony.designate(&self.world, &self.content, j, rect, plant)
     }
 
     pub fn cancel(&mut self, rect: TileRect) {
+        let life = &self.life;
+        self.colony.hunt_marks.retain(|id| !life.get(*id).is_some_and(|c| rect.contains(c.tile())));
         let content = self.content.clone();
         self.colony.cancel(&mut self.world, &content, rect);
     }
@@ -739,17 +757,14 @@ impl Game {
                     if let Some(life) = &content.creatures.by_idx(def).life {
                         // Remains belong to whoever lives there: a tribe on its land,
                         // the colony near home; out in the wilds they are lost.
+                        // The colony gets its meat by hunting.
                         let t = tile_of_f(pos.0, pos.1);
-                        let owner = self.tribes.land_at(t).map(|tr| tr.id);
-                        if owner.is_none() && t.chebyshev(self.home) > 45 {
-                            continue;
-                        }
+                        let Some(owner) = self.tribes.land_at(t).map(|tr| tr.id) else { continue };
                         for (item, n) in &life.remains {
-                            if let Some(i) = content.items.idx(item) {
-                                match owner.and_then(|id| self.tribes.list.iter_mut().find(|tr| tr.id == id)) {
-                                    Some(tr) => tr.colony.items.add(&self.world, &content, i, *n, t),
-                                    None => self.colony.items.add(&self.world, &content, i, *n, t),
-                                }
+                            if let Some(i) = content.items.idx(item)
+                                && let Some(tr) = self.tribes.list.iter_mut().find(|tr| tr.id == owner)
+                            {
+                                tr.colony.items.add(&self.world, &content, i, *n, t);
                             }
                         }
                     }
@@ -762,6 +777,145 @@ impl Game {
                     self.message(format!("The {name} have died out here."));
                     self.fire_event("on_extinct", vec![name.into()]);
                 }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ hunting
+
+    /// Send free colonists after animals marked for hunting, chase them down,
+    /// and bring the meat and hide home. Wolves bite back.
+    fn hunt(&mut self) {
+        let content = self.content.clone();
+        let Some(job) = content.jobs.iter().find(|(_, j)| j.driver == JobDriver::Hunt).map(|(_, j)| j.id.clone()) else { return };
+        let life = &self.life;
+        self.colony.hunt_marks.retain(|id| life.get(*id).is_some_and(|c| c.dead.is_none()));
+        let reach = TILE as f32 * 1.7;
+        let mut kills: Vec<(String, u32)> = Vec::new();
+        let mut killed_by: Vec<(u32, String)> = Vec::new();
+        let hunters: Vec<(u32, u32)> = self.colony.hunters.iter().map(|(a, b)| (*a, *b)).collect();
+        for (pid, prey) in hunters {
+            let Some(p) = self.colony.pawns.iter_mut().find(|p| p.id == pid) else {
+                self.colony.hunters.remove(&pid);
+                continue;
+            };
+            let hunting = p.job.as_ref().is_some_and(|j| j.label.starts_with(HUNTING));
+            // Called away (hungry, drafted...): give up.
+            if (p.job.is_some() && !hunting) || p.drafted {
+                self.colony.hunters.remove(&pid);
+                continue;
+            }
+            let target = self.life.get(prey).filter(|c| c.dead.is_none() && self.colony.hunt_marks.contains(&prey));
+            let Some((ppos, ptile, pdef)) = target.map(|c| (c.pos, c.tile(), c.def)) else {
+                if hunting {
+                    p.job = None;
+                    p.path.clear();
+                }
+                self.colony.hunters.remove(&pid);
+                continue;
+            };
+            let d = &content.creatures.by_idx(pdef);
+            let (dx, dy) = (ppos.0 - p.pos.0, ppos.1 - p.pos.1);
+            if (dx * dx + dy * dy).sqrt() <= reach {
+                if self.tick % 10 != 0 {
+                    continue;
+                }
+                // Small animals are easier to catch; brave hunters strike more often.
+                let size = d.life.as_ref().map(|l| l.size).unwrap_or(1.0);
+                let nerve = 0.7 + p.mind.persona.brave * 0.6;
+                if self.rng.chance((0.3 * nerve / size.max(0.3)).clamp(0.08, 0.7)) {
+                    kills.push((p.name.clone(), prey));
+                    p.job = None;
+                    p.path.clear();
+                    self.colony.hunters.remove(&pid);
+                } else if d.life.as_ref().is_some_and(|l| l.tags.iter().any(|t| t == "predator")) && self.rng.chance(0.4) {
+                    p.needs.health -= 0.12;
+                    if p.needs.health <= 0.0 {
+                        killed_by.push((pid, d.name.to_lowercase()));
+                    }
+                }
+                continue;
+            }
+            let retarget = match &p.job {
+                Some(pw_colony::Job { kind: pw_colony::JobKind::Wander { dest }, .. }) => dest.chebyshev(ptile) > 1,
+                _ => true,
+            };
+            if retarget {
+                p.job = Some(pw_colony::Job {
+                    kind: pw_colony::JobKind::Wander { dest: ptile },
+                    stage: 0,
+                    timer: 0.0,
+                    label: format!("{HUNTING} {}", d.name.to_lowercase()),
+                });
+                p.path.clear();
+            }
+        }
+        for (who, prey) in kills {
+            self.colony.hunt_marks.remove(&prey);
+            if let Some((def, pos)) = self.life.kill(prey, pw_life::Death::Hunted) {
+                let t = tile_of_f(pos.0, pos.1);
+                let d = content.creatures.by_idx(def);
+                if let Some(l) = &d.life {
+                    for (item, n) in &l.remains {
+                        if let Some(i) = content.items.idx(item) {
+                            self.colony.items.add(&self.world, &content, i, *n, t);
+                        }
+                    }
+                }
+                self.message(format!("{who} hunted a {}.", d.name.to_lowercase()));
+            }
+        }
+        for (pid, by) in killed_by {
+            self.colony.hunters.remove(&pid);
+            if let Some(p) = self.colony.remove_pawn(&mut self.world, &content, &mut self.rng, pid) {
+                self.message(format!("{} was killed by a {by} while hunting.", p.name));
+                self.fire_event("on_colonist_died", vec![p.name.into(), "killed".into()]);
+            }
+        }
+
+        // Send free hunters after marked animals nobody is chasing yet.
+        if self.tick % 15 != 0 || self.colony.hunt_marks.is_empty() {
+            return;
+        }
+        let chased: std::collections::BTreeSet<u32> = self.colony.hunters.values().copied().collect();
+        let marks: Vec<u32> = self.colony.hunt_marks.iter().copied().filter(|m| !chased.contains(m)).collect();
+        for prey in marks {
+            let Some(c) = self.life.get(prey) else { continue };
+            let (ppos, ptile, pdef) = (c.pos, c.tile(), c.def);
+            let pick = self
+                .colony
+                .pawns
+                .iter()
+                .filter(|p| {
+                    let prio = p.work_priority(&job);
+                    let n = &p.needs;
+                    let well = n.food >= 0.3 && n.rest >= 0.25 && n.warmth >= 0.4 && n.health >= 0.4;
+                    let free = match &p.job {
+                        None => true,
+                        Some(j) => match j.kind {
+                            pw_colony::JobKind::Wander { .. } => !j.label.starts_with(HUNTING),
+                            // Hunters by trade (priority 1) put down other work for it.
+                            pw_colony::JobKind::Work { .. } | pw_colony::JobKind::Construct { .. } => prio == 1 && p.carrying.is_none(),
+                            _ => false,
+                        },
+                    };
+                    prio > 0 && !p.drafted && well && free && !self.colony.hunters.contains_key(&p.id)
+                })
+                .min_by(|a, b| {
+                    let da = (a.pos.0 - ppos.0).powi(2) + (a.pos.1 - ppos.1).powi(2);
+                    let db = (b.pos.0 - ppos.0).powi(2) + (b.pos.1 - ppos.1).powi(2);
+                    da.total_cmp(&db)
+                })
+                .map(|p| (p.id, p.job.is_some()));
+            let Some((pid, busy)) = pick else { break };
+            if busy {
+                self.colony.interrupt(&mut self.world, &content, &mut self.rng, pid);
+            }
+            let name = content.creatures.by_idx(pdef).name.to_lowercase();
+            if let Some(p) = self.colony.pawns.iter_mut().find(|p| p.id == pid) {
+                p.job = Some(pw_colony::Job { kind: pw_colony::JobKind::Wander { dest: ptile }, stage: 0, timer: 0.0, label: format!("{HUNTING} {name}") });
+                p.path.clear();
+                self.colony.hunters.insert(pid, prey);
             }
         }
     }
@@ -998,6 +1152,9 @@ impl Game {
             let days = c.age as f32 / DAY_TICKS as f32;
             out.push(format!("{sp}, {days:.1} days old, generation {}", c.generation));
             out.push(format!("{} - energy {:.0}", c.activity(), c.energy));
+            if self.colony.hunt_marks.contains(&c.id) {
+                out.push("Marked for hunting".into());
+            }
         }
         if let Some((tr, p)) = self.tribe_pawn_at((px as f32, py as f32), 6.0) {
             out.extend(self.describe_tribe_pawn(tr, p));

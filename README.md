@@ -59,7 +59,9 @@ The number is the world seed; leave it out for the default world. The first buil
 - Plant saplings and watch them grow into trees.
 
 **Keep them alive**
-- **Hunger.** A full stomach lasts about a day. Hungry colonists drop their work and go eat from your stores: berries fill a third of a stomach, meat more than half. You land with a few days of food; after that, mark berry bushes to harvest. With no food, they starve.
+- **Hunger.** A full stomach lasts about a day. Hungry colonists drop their work and go eat from your stores, cooked meals first. You land with a few days of food; after that, harvest berries and hunt. With no food, they starve.
+- **Hunting.** Drag the *Hunt* order over rabbits, deer or wolves to mark them (a red ring). A free colonist chases each one down, and the meat and hide come home. Small animals are easy; deer take longer, and wolves bite back. Colonists with Hunt at priority 1 drop other work to go hunting.
+- **Cooking.** Build a campfire and colonists cook there whenever meals run low: raw meat into roasts, berries into berry cakes. A roast fills nearly a whole stomach, raw meat less than half. Recipes are data files, so mods can add more.
 - **Sleep.** Colonists need sleep about every 18 hours, and at night they go to bed. A bed rests them faster than the ground, and they look for a roof if there is no bed. Too tired and they slow down, then collapse where they stand.
 - **Warmth.** Each colonist feels the temperature where they stand: the weather, colder in wind and rain, milder under a roof, and warmer near a campfire. Below 12 C they get cold and go and warm up. A spring night outside is fine, but autumn and winter nights need a roof and a fire, or they freeze.
 - **Health.** Starving, freezing or standing in fire hurts. Colonists heal when they are fed and warm. The colonist panel shows each need as a bar, and the list flags anyone hungry, tired or cold.
@@ -73,7 +75,7 @@ The number is the world seed; leave it out for the default world. The first buil
 - **Plants follow the climate.** Growth speeds up in spring and stops in the frost. Grass only spreads when it's warm.
 
 **Living things that evolve**
-- **Rabbits, deer and wolves** live on their own. They graze grass (eating round patches into the meadow), browse bushes, hunt, flee, gather in herds and packs, rest at night, breed and die. Their meat and hide are left behind for your colony.
+- **Rabbits, deer and wolves** live on their own. They graze grass (eating round patches into the meadow), browse bushes, hunt, flee, gather in herds and packs, rest at night, breed and die. Hunt them for meat and hide.
 - **Genes:** every animal carries speed, size, sight, metabolism, fertility, boldness, cold tolerance, lifespan and colour. Each one has a trade-off: fast animals burn more food, and thick fur overheats in summer. Children inherit a mix of their parents' genes with small mutations, so winters favour woolly animals and wolves favour fast rabbits.
 - **Learning:** each animal has a small brain that weighs its options (eat, flee, hunt, mate, herd, wander, rest). It learns from what paid off, and its young start from what their parents learned.
 - **New species:** when a lineage drifts far enough from its ancestors it gets a name of its own, like *Woolly Rabbit* or *Swift Wolf*, and shows up in the **Life** window (L) with its population trend and family tree.
@@ -169,7 +171,8 @@ assets/mods/my_mod/
   mod.toml          id, name, version, depends = ["core"]
   materials/*.ron   colour, tags (flammable, support, leaves...), blocks, walk cost, yields,
                     heat given off (fire, embers, lava)
-  items/*.ron       stack size, nutrition (food)
+  items/*.ron       stack size, nutrition (food; tag `meal` for cooked food)
+  recipes/*.ron     things made at a station: input, output, work, stock to keep
   objects/*.ron     painted patterns or procedural shapes (circle, blob, rect, scatter)
   biomes/*.ron      climate ranges, ground mix, mountains, ore veins, what grows there
   reactions/*.ron   particle rules: input, neighbour, chance, effects, swap (movement),
@@ -254,6 +257,7 @@ The tests cover:
 - chopping, harvesting, mining, hauling and building a room
 - work priorities
 - colonists eating, starving without food, sleeping in beds and warming up by a fire
+- hunting marked animals, and cooking at a campfire
 - fire, rain and wind; lava, ice, flooding and smoke
 - roof support and collapse
 - seasons and weather
@@ -277,13 +281,14 @@ Tools for testing:
   - `PW_AUTOSHOT_SPEED`: game speed
   - `PW_AUTOSHOT_TRIBES=N`: let the tribes live N days, then look at one
   - `PW_AUTOSHOT_NEEDS=1`: select a hungry colonist to show its needs
+  - `PW_AUTOSHOT_HUNT=1`: rabbits and deer nearby, marked for hunting
   - `PW_AUTOSHOT_PEOPLE=1`: lonely colonists, zoomed in, with the Character and Chatter windows open; add `PW_AUTOSHOT_MODEL=llama3.2:3b` to hook the first one to a model
 - **A real model at work:** `PW_LIVE_MODEL=llama3.2:3b cargo test -p pw_game --test social live_model -- --ignored --nocapture` lets a local model run a colonist for 90 seconds and prints its thoughts and lines.
 - **Frame times:** `PW_FRAMES=1` prints frame timings.
 
 ## Roadmap
 
-Next on the list: hunting and taming, cooking and crafting, farming zones, clothes for the cold, trade and diplomacy with tribes.
+Next on the list: taming, crafting, farming zones, clothes for the cold, trade and diplomacy with tribes.
 
 ## Contributing
 

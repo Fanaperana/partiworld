@@ -419,6 +419,53 @@ pub enum JobDriver {
     Haul,
     /// Build blueprints.
     Construct,
+    /// Chase down and kill animals marked for hunting.
+    Hunt,
+    /// Make recipes (cook meals) at a station.
+    Cook,
+}
+
+/// Something colonists make at a station, e.g. a roast from raw meat at a
+/// campfire. Cooks make it whenever the colony has less than `keep` per colonist.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecipeDef {
+    pub id: String,
+    pub name: String,
+    /// Object tags of the stations it is made at.
+    #[serde(default = "default_station")]
+    pub station: Vec<String>,
+    /// Item used and how many.
+    pub input: (String, u32),
+    /// Item made and how many.
+    pub output: (String, u32),
+    /// Seconds of work at the station.
+    #[serde(default = "default_recipe_work")]
+    pub work: f32,
+    /// Stock to keep per colonist; cooks stop above it.
+    #[serde(default = "default_keep")]
+    pub keep: f32,
+    /// The job (work priority) that makes it.
+    #[serde(default = "default_cook_job")]
+    pub job: String,
+}
+
+fn default_station() -> Vec<String> {
+    vec!["cook".into()]
+}
+fn default_recipe_work() -> f32 {
+    6.0
+}
+fn default_keep() -> f32 {
+    2.0
+}
+fn default_cook_job() -> String {
+    "core:cook".into()
+}
+
+impl Def for RecipeDef {
+    fn def_id(&self) -> &str {
+        &self.id
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

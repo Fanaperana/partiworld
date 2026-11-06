@@ -408,6 +408,7 @@ pub struct Content {
     pub creatures: Registry<CreatureDef>,
     pub powers: Registry<PowerDef>,
     pub tribes: Registry<TribeDef>,
+    pub recipes: Registry<RecipeDef>,
     pub worldgen: WorldGenDef,
     pub climate: ClimateDef,
 
@@ -455,6 +456,7 @@ impl Content {
             creatures: Registry::new(),
             powers: Registry::new(),
             tribes: Registry::new(),
+            recipes: Registry::new(),
             worldgen: WorldGenDef::default(),
             climate: ClimateDef::default(),
             mats: Vec::new(),

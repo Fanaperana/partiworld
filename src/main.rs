@@ -170,6 +170,12 @@ fn autoshot(
                 ui.selected = Some(p.id);
             }
         }
+        // Optional: rabbits and deer close by, marked for hunting.
+        if std::env::var("PW_AUTOSHOT_HUNT").is_ok() {
+            g.spawn_group("core:rabbit", home.offset(9, 3), 4);
+            g.spawn_group("core:deer", home.offset(-10, 6), 3);
+            g.designate("core:hunt", pw_core::TileRect::from_corners(home.offset(-20, -12), home.offset(20, 14)), None);
+        }
         // Optional: people's minds. Lonely colonists gather and chat; the first
         // one's character window is open. PW_AUTOSHOT_MODEL=<name> hooks them to a model.
         if std::env::var("PW_AUTOSHOT_PEOPLE").is_ok() {

@@ -1,0 +1,6 @@
+// Recipes: made at a station (an object with one of the `station` tags)
+// whenever the colony has less than `keep` per colonist.
+[
+    RecipeDef(id: "core:roast_meat", name: "Roast meat", input: ("core:meat", 1), output: ("core:roast", 1), work: 6.0, keep: 2.0),
+    RecipeDef(id: "core:bake_berries", name: "Berry cakes", input: ("core:berries", 3), output: ("core:berry_cake", 2), work: 8.0, keep: 2.0),
+]
