@@ -26,6 +26,15 @@ const HEAR_RANGE: f32 = TILE as f32 * 7.0;
 const NEAR_TILES: i32 = 16;
 /// Longest wait for a model's line in a chat before using a stock line.
 const MODEL_WAIT: u64 = 30 * 20;
+/// Answer shapes shown to the model, a different one per person so a small
+/// model copying the example doesn't make everyone say the same thing.
+const EXAMPLES: [&str; 5] = [
+    r#"{"thought": "The wall won't build itself.", "say": "", "do": "work"}"#,
+    r#"{"thought": "I wonder what Ada is doing.", "say": "Ada! Wait up!", "do": "talk_to:Ada"}"#,
+    r#"{"thought": "Too cold out here.", "say": "Who lit the fire?", "do": "warm_up"}"#,
+    r#"{"thought": "We need more wood before dark.", "say": "Bram, fetch some wood, would you?", "do": "tell:Bram:work"}"#,
+    r#"{"thought": "My feet hurt.", "say": "I'm sitting down for a bit.", "do": "rest"}"#,
+];
 /// Most lines kept in the world's chatter feed.
 const FEED: usize = 60;
 const HOUR: u64 = DAY_TICKS / 24;
@@ -189,11 +198,36 @@ impl Game {
         colony.order(&mut self.world, &content, &mut self.rng, &env, w.id, order)
     }
 
+    /// Turn the model on (or off) for everyone at once.
+    pub fn set_everyone(&mut self, on: bool) {
+        self.social.llm.cfg.everyone = on;
+        for w in self.people() {
+            if let Some(p) = self.person_mut(w) {
+                p.mind.hooked = on;
+                p.mind.model_set = true;
+            }
+        }
+        self.message(if on { format!("Everyone now thinks with {}.", self.social.llm.cfg.label()) } else { "Nobody thinks with the model now.".to_string() });
+    }
+
+    /// A direct order from the player: obeyed, and the person's own will waits
+    /// a couple of hours (or until they're told otherwise).
+    pub fn player_order(&mut self, w: Who, act: &str) {
+        let tick = self.tick;
+        self.apply_act(w, act, false);
+        if let Some(p) = self.person_mut(w) {
+            p.mind.obey_until = tick + HOUR * 2;
+            p.mind.request = None;
+            p.mind.remember(tick, format!("You were told to {}.", act.replace('_', " ")));
+        }
+    }
+
     /// Hook a person's mind to the model (or unhook it).
     pub fn set_hooked(&mut self, w: Who, on: bool) {
         let tick = self.tick;
         let Some(p) = self.person_mut(w) else { return };
         p.mind.hooked = on;
+        p.mind.model_set = true;
         let uid = p.mind.uid;
         let name = p.name.clone();
         p.mind.remember(tick, if on { "Something new stirs in your mind." } else { "Your mind feels like your own again." });
@@ -247,6 +281,16 @@ impl Game {
             let m = pw_colony::Mind::new(&mut self.social.rng);
             if let Some(p) = self.person_mut(w) {
                 p.mind = m;
+            }
+        }
+        // Everyone thinks for themselves with the model, unless unticked.
+        if self.social.llm.cfg.everyone && self.social.llm.cfg.usable() {
+            let new: Vec<Who> = self.all_pawns().filter(|(_, p)| !p.mind.model_set).map(|(o, p)| Who { owner: o, id: p.id }).collect();
+            for w in new {
+                if let Some(p) = self.person_mut(w) {
+                    p.mind.hooked = true;
+                    p.mind.model_set = true;
+                }
             }
         }
     }
@@ -643,8 +687,27 @@ impl Game {
     fn hooked_thinking(&mut self) {
         let tick = self.tick;
         let every = (self.social.llm.cfg.think_every.max(2.0) * TPS) as u64;
-        let hooked: Vec<(Who, u64)> = self.all_pawns().filter(|(_, p)| p.mind.hooked).map(|(o, p)| (Who { owner: o, id: p.id }, p.mind.uid)).collect();
-        for (w, uid) in hooked {
+        // Colonists first, then villagers nearest the camera: one model serves everyone.
+        let view = self.view.map(|(a, b)| {
+            let (ax, ay) = a.origin();
+            let (bx, by) = b.origin();
+            ((ax + bx) as f32 / 2.0, (ay + by) as f32 / 2.0)
+        });
+        let mut hooked: Vec<(f32, Who, u64)> = self
+            .all_pawns()
+            .filter(|(_, p)| p.mind.hooked && !p.drafted && p.mind.obey_until <= tick)
+            .map(|(o, p)| {
+                let far = view.map(|v| dist(p.pos, v)).unwrap_or(0.0);
+                // Being asked something jumps the queue.
+                let asked = if p.mind.request.is_some() { -1e6 } else { 0.0 };
+                (if o == 0 { 0.0 } else { 1e5 } + far + asked, Who { owner: o, id: p.id }, p.mind.uid)
+            })
+            .collect();
+        hooked.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for (_, w, uid) in hooked {
+            if !self.social.llm.has_room() {
+                break;
+            }
             if self.social.llm.busy(uid) || self.social.convo_of(w).is_some() || self.person(w).is_some_and(|p| p.sleeping()) {
                 continue;
             }
@@ -652,7 +715,8 @@ impl Game {
                 continue;
             }
             let (system, user) = self.decide_prompt(w);
-            if self.social.llm.ask(uid, Purpose::Decide, system, user) {
+            // Colonists reason before they act; villagers answer straight away.
+            if self.social.llm.ask_with(uid, Purpose::Decide, system, user, w.owner == 0) {
                 self.social.next_think.insert(uid, tick + every);
             }
         }
@@ -707,6 +771,15 @@ impl Game {
                 }
             }
             Some(Purpose::Decide) => {
+                // Answering a request: agreeing or refusing is remembered by both.
+                if let Some(req) = self.person_mut(w).and_then(|p| p.mind.request.take()) {
+                    let agreed = r.act.to_lowercase().replace(['-', ' '], "_").starts_with(req.act.split(':').next().unwrap_or(""));
+                    self.answer_request(w, &req, agreed, if r.say.is_empty() { None } else { Some(r.say.clone()) });
+                    if !r.act.is_empty() {
+                        self.apply_act(w, &r.act, false);
+                    }
+                    return;
+                }
                 let talk_to = r.act.to_lowercase().starts_with("talk");
                 if !talk_to && !r.say.is_empty() {
                     self.say_aloud(w, &r.say, true);
@@ -784,6 +857,10 @@ impl Game {
                 let to = self.home_of(w.owner);
                 self.order_person(w, Order::Walk { to, label: "Heading home".into() })
             }
+            "tell" | "ask" | "order" => {
+                let (target, what) = arg.split_once(':').map(|(a, b)| (a.trim().to_string(), b.trim().replace(' ', "_"))).unwrap_or_else(|| ("everyone".into(), arg.replace(' ', "_")));
+                return self.give_request(w, &target, &what);
+            }
             "talk_to" | "talk" | "talk_with" => {
                 let target = self.person_named(&arg, here, w);
                 match target {
@@ -809,6 +886,79 @@ impl Game {
         };
         if ok {
             note(self, format!("Decided to {}.", if arg.is_empty() { verb.replace('_', " ") } else { format!("{} {arg}", verb.replace('_', " ")) }));
+        }
+    }
+
+    /// Ask someone (or everyone) within earshot to do something. Each one who
+    /// hears decides: people thinking with a model are asked, the others go by
+    /// their nature, mood and what they think of the speaker.
+    fn give_request(&mut self, w: Who, target: &str, act: &str) {
+        let tick = self.tick;
+        let verb = act.split(':').next().unwrap_or("");
+        if act.is_empty() || ["tell", "ask", "order"].contains(&verb) || !crate::llm::is_action(act) {
+            return;
+        }
+        let Some(p) = self.person(w) else { return };
+        let (name, uid, pos) = (p.name.clone(), p.mind.uid, p.pos);
+        let all = ["everyone", "all", "everybody", ""].contains(&target.to_lowercase().as_str());
+        let want = target.to_lowercase();
+        let hearers: Vec<Who> = self
+            .all_pawns()
+            .filter(|(o, q)| !(*o == w.owner && q.id == w.id) && !q.sleeping() && dist(q.pos, pos) <= HEAR_RANGE)
+            .filter(|(_, q)| all || q.name.to_lowercase().starts_with(&want) || want.starts_with(&q.name.to_lowercase()))
+            .map(|(o, q)| Who { owner: o, id: q.id })
+            .collect();
+        // Make sure it was said out loud.
+        if self.person(w).is_some_and(|p| p.mind.say.as_ref().is_none_or(|(_, until)| *until < tick)) {
+            let who = if all { "everyone".to_string() } else { target.to_string() };
+            self.say_aloud(w, &format!("{}, {}!", capitalize(&who), act.replace(['_', ':'], " ")), false);
+        }
+        if let Some(p) = self.person_mut(w) {
+            p.mind.remember(tick, format!("You asked {} to {}.", if all { "everyone nearby" } else { target }, act.replace('_', " ")));
+        }
+        let req = pw_colony::mind::Request { from: uid, name: name.clone(), act: act.to_string(), at: tick };
+        for h in hearers {
+            let Some(q) = self.person(h) else { continue };
+            if q.mind.hooked && !q.drafted && q.mind.obey_until <= tick {
+                let quid = q.mind.uid;
+                if let Some(q) = self.person_mut(h) {
+                    q.mind.request = Some(req.clone());
+                }
+                self.social.think_now(quid);
+            } else if !q.drafted && q.mind.obey_until <= tick {
+                // Their own judgement: nature, mood, and how they feel about the speaker.
+                let m = &q.mind;
+                let mut yes = 0.3 + m.persona.diligent * 0.25 + m.persona.kind * 0.15 + m.opinion_of(uid) / 200.0 + (m.mood - 0.5) * 0.3;
+                if h.owner == w.owner {
+                    yes += 0.15;
+                }
+                let agreed = self.social.rng.chance(yes.clamp(0.05, 0.95));
+                self.answer_request(h, &req, agreed, None);
+                if agreed {
+                    self.apply_act(h, act, false);
+                }
+            }
+        }
+    }
+
+    /// Someone says yes or no to a request; both remember it.
+    fn answer_request(&mut self, w: Who, req: &pw_colony::mind::Request, agreed: bool, words: Option<String>) {
+        let tick = self.tick;
+        let Some(p) = self.person_mut(w) else { return };
+        let what = req.act.replace(['_', ':'], " ");
+        p.mind.remember(tick, if agreed { format!("{} asked you to {what}; you agreed.", req.name) } else { format!("{} asked you to {what}; you refused.", req.name) });
+        let name = p.name.clone();
+        let line = words.unwrap_or_else(|| {
+            let yes = ["Alright.", "On it.", "Sure thing.", "If you say so."];
+            let no = ["Not now.", "Do it yourself.", "Maybe later.", "I'd rather not."];
+            let v = if agreed { &yes } else { &no };
+            format!("{} {}", v[(tick as usize + w.id as usize) % v.len()], req.name)
+        });
+        self.say_aloud(w, &line, false);
+        if let Some(asker) = self.find_uid(req.from)
+            && let Some(a) = self.person_mut(asker)
+        {
+            a.mind.remember(tick, if agreed { format!("{name} agreed to {what}.") } else { format!("{name} refused to {what}.") });
         }
     }
 
@@ -841,10 +991,13 @@ impl Game {
              Answer with one JSON object and nothing else, with exactly these three keys:\n\
              \"thought\": your private thought, one short sentence.\n\
              \"say\": the exact words you speak out loud, or \"\" to stay quiet. Words only, not a description of what you do.\n\
-             \"do\": one of: work, eat, sleep, warm_up, rest, wander, explore, go_home, talk_to:<name of someone near you>\n\
-             Example: {{\"thought\": \"My belly is empty.\", \"say\": \"Anyone seen the berries?\", \"do\": \"eat\"}}",
+             \"do\": one of: work, eat, sleep, warm_up, rest, wander, explore, go_home, talk_to:<name of someone near you>, \
+             tell:<name or everyone>:<one of those actions> (ask people who can hear you to do something; they may refuse)\n\
+             You are free: do whatever you think is best for you.\n\
+             Only an example of the shape (use your own words): {example}",
             name = p.name,
             group = self.group_name(w.owner),
+            example = EXAMPLES[(p.mind.uid % EXAMPLES.len() as u64) as usize],
         )
     }
 
@@ -898,6 +1051,13 @@ impl Game {
         if !ops.is_empty() {
             let ol: Vec<String> = ops.iter().take(5).map(|o| format!("{} ({})", o.name, o.word())).collect();
             s += &format!("People you know: {}.\n", ol.join(", "));
+        }
+        if let Some(r) = &m.request {
+            s += &format!(
+                "{} just asked you to {}. You can do it (put that in \"do\") or refuse; say your answer out loud.\n",
+                r.name,
+                r.act.replace(['_', ':'], " ")
+            );
         }
         let mem: Vec<&pw_colony::mind::Memory> = m.memories.iter().rev().take(8).collect();
         if !mem.is_empty() {

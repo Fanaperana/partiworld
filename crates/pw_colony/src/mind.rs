@@ -170,6 +170,26 @@ pub struct Mind {
     pub last_work: String,
     /// A language model chooses this person's words and plans.
     pub hooked: bool,
+    /// The model setting was decided for this person (automatically or by the player),
+    /// so "everyone thinks" doesn't turn it back on.
+    #[serde(default)]
+    pub model_set: bool,
+    /// The player gave a direct order: the person's own will waits until this tick.
+    #[serde(default)]
+    pub obey_until: u64,
+    /// Someone asked this person to do something (they may do it or refuse).
+    #[serde(default)]
+    pub request: Option<Request>,
+}
+
+/// Something one person asked another to do, out loud.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Request {
+    pub from: u64,
+    pub name: String,
+    /// The action asked for (as a model action: "work", "go_home"...).
+    pub act: String,
+    pub at: u64,
 }
 
 impl Default for Mind {
@@ -188,6 +208,9 @@ impl Default for Mind {
             chat_after: 0,
             last_work: String::new(),
             hooked: false,
+            model_set: false,
+            obey_until: 0,
+            request: None,
         }
     }
 }

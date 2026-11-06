@@ -111,6 +111,18 @@ pub fn person_window(ui: &mut egui::Ui, g: &mut Game, st: &mut UiState) {
     });
 
     ui.separator();
+    // Direct orders: obeyed, and their own will waits a couple of hours.
+    ui.horizontal_wrapped(|ui| {
+        ui.label(egui::RichText::new("Tell them to:").small());
+        for (label, act) in [("Work", "work"), ("Eat", "eat"), ("Sleep", "sleep"), ("Warm up", "warm_up"), ("Rest", "rest"), ("Explore", "explore"), ("Go home", "go_home")] {
+            if ui.small_button(label).on_hover_text("A direct order: they do it, and stop deciding for themselves for a couple of hours.").clicked() {
+                g.player_order(w, act);
+            }
+        }
+    });
+    if m.obey_until > g.tick {
+        ui.label(egui::RichText::new("Following your orders for now.").small().weak());
+    }
     let mut hooked = m.hooked;
     let model = g.social.llm.cfg.label();
     if ui
@@ -158,6 +170,14 @@ fn day_time(tick: u64) -> (u64, u32, u32) {
 
 /// Where the model lives and how often it's asked.
 pub fn model_window(ui: &mut egui::Ui, g: &mut Game, st: &mut UiState) {
+    let mut everyone = g.social.llm.cfg.everyone;
+    if ui
+        .checkbox(&mut everyone, "Everyone thinks with the model (colonists and villagers)")
+        .on_hover_text("They choose what to do and say for themselves, and can ask each other for things. Untick someone in their Character window to leave them out. Your direct orders always come first.")
+        .changed()
+    {
+        g.set_everyone(everyone);
+    }
     let cfg = &mut g.social.llm.cfg;
     ui.checkbox(&mut cfg.builtin, "Use the built-in model (Qwen3 0.6B, runs on the CPU)")
         .on_hover_text("A small reasoning model the game runs itself: no server, no internet. Untick to use Ollama or another server instead.");

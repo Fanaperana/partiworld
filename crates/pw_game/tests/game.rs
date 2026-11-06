@@ -1053,3 +1053,33 @@ fn builtin_model_thinks_for_a_colonist() {
     assert!(g.social.llm.errors == 0, "{}", g.social.llm.status);
     assert!(answers >= 1, "no answer: {}", g.social.llm.status);
 }
+
+/// Everyone thinks with the built-in model for two minutes; prints what they say and decide.
+/// `cargo test --release -p pw_game --test game everyone_free -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn everyone_free_with_builtin_model() {
+    let mut g = new_game(41);
+    g.social.llm.cfg.builtin = true;
+    g.social.llm.cfg.everyone = true;
+    g.social.llm.cfg.model_dir = mods_dir().join("../../models/qwen3-0.6b").to_string_lossy().to_string();
+    assert!(g.social.llm.cfg.builtin_ready(), "model not downloaded");
+    let t = std::time::Instant::now();
+    let mut shown = 0;
+    while t.elapsed().as_secs() < 120 {
+        g.step();
+        let feed: Vec<String> = g.social.feed.iter().map(|l| format!("{}{} -> {}: {}", if l.model { "[model] " } else { "" }, l.name, l.to, l.text)).collect();
+        for l in feed.iter().skip(shown) {
+            println!("[{:>3.0}s] {l}", t.elapsed().as_secs_f32());
+        }
+        shown = feed.len();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let hooked = g.all_pawns().filter(|(_, p)| p.mind.hooked).count();
+    println!("hooked {hooked} of {}, answers {}, errors {}, status {}", g.all_pawns().count(), g.social.llm.calls, g.social.llm.errors, g.social.llm.status);
+    for (_, p) in g.all_pawns().filter(|(_, p)| !p.mind.thought.is_empty()).take(8) {
+        println!("  {}: \"{}\" ({})", p.name, p.mind.thought, p.activity());
+    }
+    assert!(hooked > 3);
+    assert!(g.social.llm.calls > 3);
+}

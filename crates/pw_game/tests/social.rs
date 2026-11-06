@@ -137,6 +137,7 @@ fn serde_json_body(content: &str) -> String {
 fn a_hooked_person_says_and_does_what_the_model_says() {
     let mut g = new_game(5);
     g.social.llm.cfg.builtin = false;
+    g.social.llm.cfg.everyone = false;
     g.social.llm.cfg.url = fake_model(r#"{"thought": "I could use a walk.", "say": "Off to see what's out there!", "do": "explore"}"#, 4);
     let w = Who { owner: 0, id: g.colony.pawns[0].id };
     g.set_hooked(w, true);
@@ -201,4 +202,45 @@ fn live_model() {
     }
     println!("--- notes ---\n{}", g.situation(w));
     println!("status: {}", g.social.llm.status);
+}
+
+#[test]
+fn spoken_orders_are_heard_and_each_listener_decides() {
+    let mut g = new_game(5);
+    g.social.llm.cfg.builtin = false;
+    g.social.llm.cfg.everyone = false;
+    g.social.llm.cfg.url = fake_model(r#"{"thought": "Time to head back.", "say": "Everyone, go home now!", "do": "tell:everyone:go_home"}"#, 2);
+    // Everyone within earshot of the first colonist.
+    let here = g.colony.pawns[0].pos;
+    for (i, p) in g.colony.pawns.iter_mut().enumerate().skip(1) {
+        p.pos = (here.0 + 6.0 * i as f32, here.1);
+    }
+    let w = Who { owner: 0, id: g.colony.pawns[0].id };
+    g.set_hooked(w, true);
+    let others: Vec<Who> = g.colony.pawns.iter().skip(1).map(|p| Who { owner: 0, id: p.id }).collect();
+    let answered = |g: &Game| others.iter().all(|o| g.person(*o).is_some_and(|p| p.mind.memories.iter().any(|m| m.text.contains("asked you to go home"))));
+    let mut ok = false;
+    for _ in 0..800 {
+        g.step();
+        if answered(&g) {
+            ok = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(ok, "listeners never answered; status {}", g.social.llm.status);
+    // Each one said yes or no out loud, and the speaker heard about it.
+    for o in &others {
+        let p = g.person(*o).unwrap();
+        let agreed = p.mind.memories.iter().any(|m| m.text.ends_with("you agreed."));
+        assert!(g.social.feed.iter().any(|l| l.who == *o), "{} said nothing", p.name);
+        if agreed {
+            assert_eq!(p.activity(), "Heading home", "{} agreed but is {}", p.name, p.activity());
+        }
+    }
+    let speaker = g.person(w).unwrap();
+    assert!(speaker.mind.memories.iter().any(|m| m.text.contains("agreed to") || m.text.contains("refused to")), "{:?}", speaker.mind.memories);
+    // A direct order from the player puts their own will on hold.
+    g.player_order(others[0], "rest");
+    assert!(g.person(others[0]).unwrap().mind.obey_until > g.tick);
 }

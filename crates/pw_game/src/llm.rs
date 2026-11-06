@@ -27,6 +27,8 @@ pub struct LlmConfig {
     pub think_tokens: u32,
     /// Built-in model: CPU threads to use (0 = half the cores).
     pub threads: u32,
+    /// Everyone (colonists and villagers) thinks with the model unless unticked one by one.
+    pub everyone: bool,
     /// Chat completions URL.
     pub url: String,
     pub model: String,
@@ -47,6 +49,7 @@ impl Default for LlmConfig {
             model_dir: pw_brain::DEFAULT_DIR.into(),
             think_tokens: 256,
             threads: 0,
+            everyone: true,
             url: "http://localhost:11434/v1/chat/completions".into(),
             model: "llama3.2:3b".into(),
             api_key: String::new(),
@@ -67,6 +70,11 @@ impl LlmConfig {
     /// Is the built-in model downloaded?
     pub fn builtin_ready(&self) -> bool {
         pw_brain::model_file(Path::new(&self.model_dir)).is_some()
+    }
+
+    /// Can a model be asked at all (a server, or the built-in one downloaded)?
+    pub fn usable(&self) -> bool {
+        !self.builtin || self.builtin_ready()
     }
 
     /// From a JSON file, then `PW_LLM_URL` / `PW_LLM_MODEL` / `PW_LLM_KEY`.
@@ -218,6 +226,16 @@ impl Llm {
 
     /// Queue a request. False if too many are waiting already.
     pub fn ask(&mut self, uid: u64, purpose: Purpose, system: String, user: String) -> bool {
+        self.ask_with(uid, purpose, system, user, true)
+    }
+
+    /// Room for one more request?
+    pub fn has_room(&self) -> bool {
+        self.pending.len() < MAX_PENDING
+    }
+
+    /// Queue a request; `reason` false skips the built-in model's reasoning (faster).
+    pub fn ask_with(&mut self, uid: u64, purpose: Purpose, system: String, user: String, reason: bool) -> bool {
         if self.pending.len() >= MAX_PENDING || self.pending.contains(&uid) {
             return false;
         }
@@ -225,7 +243,11 @@ impl Llm {
             self.start();
         }
         let Some(tx) = &self.tx else { return false };
-        let req = Request { uid, purpose, system, user, cfg: self.cfg.clone() };
+        let mut cfg = self.cfg.clone();
+        if !reason {
+            cfg.think_tokens = 0;
+        }
+        let req = Request { uid, purpose, system, user, cfg };
         if tx.send(req).is_err() {
             self.tx = None;
             return false;
@@ -434,6 +456,7 @@ pub fn is_action(a: &str) -> bool {
     let verb = a.split(':').next().unwrap_or("");
     ["work", "eat", "sleep", "warm_up", "warm", "warmup", "rest", "wait", "idle", "wander", "walk", "explore", "go_home", "home"].contains(&verb)
         || verb.starts_with("talk")
+        || ["tell", "ask", "order"].contains(&verb)
 }
 
 fn clip(s: &str, n: usize) -> String {
