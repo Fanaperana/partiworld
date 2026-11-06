@@ -3,6 +3,7 @@
 //! for colonists, items and blueprints. All images are generated from
 //! particle data; there are no sprite files.
 
+mod flame;
 mod light;
 
 use std::collections::{HashMap, HashSet};
@@ -182,6 +183,9 @@ struct Views {
     content_ptr: usize,
     /// The sun this frame (for shadows under people too).
     sun: light::Sun,
+    /// Campfire flame animation frames, and a flame sprite per campfire.
+    flame_frames: Vec<Handle<Image>>,
+    flames: HashMap<pw_world::ObjId, Entity>,
 }
 
 pub struct PwRenderPlugin;
@@ -195,7 +199,7 @@ impl Plugin for PwRenderPlugin {
             .add_systems(Startup, setup_camera)
             .add_systems(
                 Update,
-                (run_sim, update_view, sync_chunks, light_chunks, sync_items, sync_blueprints, sync_pawns, sync_animals, day_night, weather_fx, draw_flashes, draw_zones).chain(),
+                (run_sim, update_view, sync_chunks, light_chunks, sync_items, sync_blueprints, sync_pawns, sync_animals, flame::sync_flames, day_night, weather_fx, draw_flashes, draw_zones).chain(),
             );
     }
 }

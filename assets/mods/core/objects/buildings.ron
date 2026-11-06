@@ -125,8 +125,8 @@
     ObjectDef(
         id: "core:campfire",
         name: "Campfire",
-        // "cook": colonists cook recipes here.
-        tags: ["furniture", "cook"],
+        // "cook": colonists cook recipes here. "flame": drawn with a burning fire.
+        tags: ["furniture", "cook", "flame"],
         anchor: Tile,
         shape: Pattern(
             palette: {'r': "core:fire_ring", 'e': "core:ember"},

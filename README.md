@@ -89,7 +89,7 @@ foreach ($f in "tokenizer.json", "config.json", "onnx/model_int8.onnx") { Invoke
 - **Weather:** clear skies, overcast, wind, fog, rain, thunderstorms, snow and blizzards, with temperature and wind shown on the top bar.
 - **Day and night:** dawn glow, bright days, orange dusks, dark nights.
 - **The sun moves.** It rises in the east and sets in the west, so shadows point west in the morning, sit short and to the north at noon, and stretch east in the evening. Trees, roofs, walls, rocks and bushes each cast shadows by their height, and clouds soften them.
-- **Night is dark, and fire lights it.** Nights are a deep blue you can still read the land through. Campfires, embers, burning grass, lava and glowing crystals push the dark back with warm light around them.
+- **Night is dark, and fire lights it.** Nights are a deep blue you can still read the land through. Campfires, embers, burning grass, lava and glowing crystals push the dark back with warm light around them, and campfires burn with a small flickering flame that throws sparks.
 - **Plants follow the climate.** Growth speeds up in spring and stops in the frost. Grass only spreads when it's warm.
 
 **Living things that evolve**
