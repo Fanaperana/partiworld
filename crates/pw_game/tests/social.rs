@@ -244,3 +244,22 @@ fn spoken_orders_are_heard_and_each_listener_decides() {
     g.player_order(others[0], "rest");
     assert!(g.person(others[0]).unwrap().mind.obey_until > g.tick);
 }
+
+#[test]
+fn people_know_where_they_are_and_what_is_around() {
+    let mut g = new_game(5);
+    for _ in 0..300 {
+        g.step();
+    }
+    let w = Who { owner: 0, id: g.colony.pawns[0].id };
+    let notes = g.situation(w);
+    println!("--- colonist\n{notes}");
+    for part in ["Where you are:", "It feels", "Around you:", "Your colony:", "Work waiting"] {
+        assert!(notes.contains(part), "missing {part:?} in:\n{notes}");
+    }
+    if let Some((o, p)) = g.all_pawns().find(|(o, _)| *o > 0) {
+        let notes = g.situation(Who { owner: o, id: p.id });
+        println!("--- villager\n{notes}");
+        assert!(notes.contains("Your village"), "{notes}");
+    }
+}

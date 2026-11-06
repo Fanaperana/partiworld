@@ -10,7 +10,7 @@ use pw_colony::{Intent, Order, Pawn, Persona, mind::relation_word};
 use pw_core::*;
 
 use crate::llm::{Llm, LlmConfig, Purpose, Reply};
-use crate::{DAY_TICKS, Game, TPS};
+use crate::{DAY_TICKS, Game, TPS, env};
 
 /// Ticks between social updates.
 pub const SOCIAL_EVERY: u64 = 10;
@@ -1001,6 +1001,188 @@ impl Game {
         )
     }
 
+    /// Where a person is and what is around them: place, light, things,
+    /// animals, dangers, and what their people have and need doing.
+    pub fn surroundings(&self, w: Who) -> String {
+        let Some(p) = self.person(w) else { return String::new() };
+        let c = &self.content;
+        let here = p.tile();
+        let mut s = String::new();
+
+        // ---- the sky
+        let sn = env::season_now(&c.climate, self.tick);
+        let hour = env::calendar(&c.climate, self.tick).hour;
+        let light = self.light();
+        let sky = if light.dark > 0.62 {
+            format!("It is dark; the sun rises at about {:02.0}:00.", sn.sunrise.round())
+        } else if hour > sn.sunset - 2.0 && hour < sn.sunset + 1.0 {
+            format!("Evening: the sun sets at about {:02.0}:00.", sn.sunset.round())
+        } else if hour < sn.sunrise + 1.5 {
+            "Early morning.".to_string()
+        } else {
+            format!("Daylight until about {:02.0}:00.", sn.sunset.round())
+        };
+
+        // ---- the place
+        let home = self.home_of(w.owner);
+        let d = here.chebyshev(home);
+        let place = if d <= 4 {
+            if w.owner == 0 { "at your colony's camp".to_string() } else { "in your village".to_string() }
+        } else {
+            let whose = match self.tribes.land_at(here) {
+                Some(t) if t.id == w.owner => " (still your people's land)".to_string(),
+                Some(t) => format!(", in the land of the {}", t.name),
+                None => String::new(),
+            };
+            format!("{d} tiles {} of {}{whose}", dir_word(here.x - home.x, here.y - home.y), if w.owner == 0 { "your camp" } else { "your village" })
+        };
+        let roof = if pw_colony::roofed(&self.world, c, here) { "under a roof" } else { "outdoors" };
+        let (fx, fy) = here.center();
+        let ground = c.mat_name(self.world.get(fx as i32, fy as i32, Layer::Floor)).to_lowercase();
+        let felt = pw_colony::felt_temp(&self.world, c, here, &self.needs_env());
+        s += &format!("Where you are: {place}, {roof}, on {ground}. It feels {felt:.0} C here. {sky}\n");
+
+        // ---- things around (nearest of each kind)
+        const R: i32 = 12;
+        let area = TileRect::from_corners(here.offset(-R, -R), here.offset(R, R));
+        let mut seen: HashMap<String, (i32, i32, i32, u32)> = HashMap::new(); // name -> (dist, dx, dy, count)
+        for o in self.world.objects_in_rect(area) {
+            let Some(inst) = self.world.objects.get(o) else { continue };
+            let proto = &c.protos[inst.def];
+            let t = tile_of((inst.min.0 + inst.max.0) / 2, (inst.min.1 + inst.max.1) / 2);
+            let mut name = c.objects.by_idx(inst.def).name.to_lowercase();
+            let mut ripe = false;
+            // Only what matters to someone living here.
+            let useful = ["tree", "bush", "rock", "bed", "furniture", "cook", "flame", "wall", "roof", "door", "harvestable"].iter().any(|t| proto.has_tag(t));
+            if !useful {
+                continue;
+            }
+            if proto.has_tag("harvestable") && pw_objects::has_yield(&self.world, c, o) {
+                ripe = true;
+            } else if proto.has_tag("wall") || proto.has_tag("roof") || proto.has_tag("door") {
+                name = if inst.built { "buildings".into() } else { "a building going up".into() };
+            }
+            let (dx, dy) = (t.x - here.x, t.y - here.y);
+            let dd = t.chebyshev(here);
+            let e = seen.entry(if ripe { format!("{name}|ripe") } else { name }).or_insert((i32::MAX, 0, 0, 0));
+            e.3 += 1;
+            if dd < e.0 {
+                *e = (dd, dx, dy, e.3);
+            }
+        }
+        // Water close by.
+        let mut water: Option<(i32, i32, i32)> = None;
+        for t in area.iter().step_by(2) {
+            let (x, y) = t.center();
+            if self.world.is_loaded(x as i32, y as i32) && c.mat_rt(self.world.get(x as i32, y as i32, Layer::Floor)).water {
+                let dd = t.chebyshev(here);
+                if water.is_none_or(|w| dd < w.0) {
+                    water = Some((dd, t.x - here.x, t.y - here.y));
+                }
+            }
+        }
+        let mut things: Vec<(i32, String)> = seen
+            .into_iter()
+            .map(|(key, (dd, dx, dy, n))| {
+                let (name, ripe) = key.split_once('|').map(|(a, _)| (a.to_string(), true)).unwrap_or((key, false));
+                let mut what = if n > 1 && !name.starts_with("building") && !name.starts_with("a ") { format!("{n} {}", plural(&name)) } else { name };
+                if ripe {
+                    what += " with ripe fruit";
+                }
+                (dd, format!("{what} ({})", where_word(dd, dx, dy)))
+            })
+            .collect();
+        if let Some((dd, dx, dy)) = water {
+            things.push((dd, format!("water ({})", where_word(dd, dx, dy))));
+        }
+        things.sort_by_key(|x| x.0);
+        if !things.is_empty() {
+            let tl: Vec<String> = things.into_iter().take(8).map(|x| x.1).collect();
+            s += &format!("Around you: {}.\n", tl.join("; "));
+        }
+
+        // ---- animals and danger
+        let reach = (R * TILE) as f32;
+        let mut animals: HashMap<String, (f32, f32, f32, u32)> = HashMap::new();
+        for cr in self.life.creatures.iter().filter(|cr| cr.dead.is_none()) {
+            let d = dist(cr.pos, p.pos);
+            if d > reach {
+                continue;
+            }
+            let name = self.life.species_of(cr.species).map(|sp| sp.name.to_lowercase()).unwrap_or_else(|| c.creatures.by_idx(cr.def).name.to_lowercase());
+            let e = animals.entry(name).or_insert((f32::MAX, 0.0, 0.0, 0));
+            e.3 += 1;
+            if d < e.0 {
+                *e = (d, cr.pos.0 - p.pos.0, cr.pos.1 - p.pos.1, e.3);
+            }
+        }
+        if !animals.is_empty() {
+            let mut al: Vec<(f32, String)> = animals
+                .into_iter()
+                .map(|(name, (d, dx, dy, n))| {
+                    let t = (d / TILE as f32).round() as i32;
+                    let danger = if self.content.creatures.iter().any(|(_, cd)| cd.name.to_lowercase() == name && cd.life.as_ref().is_some_and(|l| l.tags.iter().any(|t| t == "predator"))) { ", dangerous" } else { "" };
+                    let what = if n > 1 { format!("{n} {}", plural(&name)) } else { format!("a {name}") };
+                    (d, format!("{what}{danger} ({})", where_word(t, (dx / TILE as f32) as i32, (dy / TILE as f32) as i32)))
+                })
+                .collect();
+            al.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let al: Vec<String> = al.into_iter().take(4).map(|x| x.1).collect();
+            s += &format!("Animals: {}.\n", al.join("; "));
+        }
+        // Fire close by that isn't a campfire.
+        let mut fire: Option<(i32, i32, i32)> = None;
+        for t in TileRect::from_corners(here.offset(-8, -8), here.offset(8, 8)).iter() {
+            let (x, y) = t.center();
+            if self.world.is_loaded(x as i32, y as i32)
+                && [Layer::Floor, Layer::Solid, Layer::Overlay].iter().any(|&l| c.mat_rt(self.world.get(x as i32, y as i32, l)).hot)
+            {
+                let dd = t.chebyshev(here);
+                if fire.is_none_or(|f| dd < f.0) {
+                    fire = Some((dd, t.x - here.x, t.y - here.y));
+                }
+            }
+        }
+        if let Some((dd, dx, dy)) = fire {
+            s += &format!("DANGER: fire burning {}.\n", where_word(dd, dx, dy));
+        }
+
+        // ---- what your people have and need doing
+        if w.owner == 0 {
+            let col = &self.colony;
+            let total = |id: &str| c.items.idx(id).map(|i| col.items.total(i)).unwrap_or(0);
+            let beds = self.world.objects.instances.values().filter(|i| i.built && c.protos[i.def].has_tag("bed") && i.origin_tile().chebyshev(self.home) < 40).count();
+            let mut work: HashMap<String, u32> = HashMap::new();
+            for d in col.designations.values() {
+                *work.entry(c.jobs.by_idx(d.job).label.to_lowercase()).or_default() += 1;
+            }
+            if !col.blueprints.is_empty() {
+                work.insert("building".into(), col.blueprints.len() as u32);
+            }
+            let wl: Vec<String> = work.iter().map(|(k, v)| format!("{k} {v}")).collect();
+            s += &format!(
+                "Your colony: {} people, food for about {:.0} meals, {} wood, {} stone, {beds} beds. Work waiting: {}.\n",
+                col.pawns.len(),
+                self.meals(),
+                total("core:wood"),
+                total("core:stone"),
+                if wl.is_empty() { "none".to_string() } else { wl.join(", ") }
+            );
+        } else if let Some(t) = self.tribes.get(w.owner)
+            && let Some(def) = t.def(c)
+        {
+            s += &format!(
+                "Your village, the {}: {} people, food for {:.0} days, {} beds; they value {} most.\n",
+                t.name,
+                t.members.len(),
+                t.food_days(def, c).min(99.0),
+                t.beds,
+                t.values().join(" and ")
+            );
+        }
+        s
+    }
+
     /// Everything a person knows right now, as notes for a model.
     pub fn situation(&self, w: Who) -> String {
         let Some(p) = self.person(w) else { return String::new() };
@@ -1010,6 +1192,7 @@ impl Game {
         let weather = self.env.weather_def(&c.climate).map(|w| w.name.to_lowercase()).unwrap_or_default();
         let night = if self.light().dark > 0.62 { ", night" } else { "" };
         let mut s = format!("Time: {} day {day}, {h:02}:{mi:02}{night}. Weather: {weather}, {:.0} C.\n", self.season_name(), self.env.temp);
+        s += &self.surroundings(w);
         let mut feelings: Vec<&pw_colony::mind::Moodlet> = m.moodlets.iter().collect();
         feelings.sort_by(|a, b| b.value.abs().total_cmp(&a.value.abs()));
         let fl: Vec<String> = feelings.iter().take(5).map(|x| format!("{} ({:+.0})", x.label, x.value * 100.0)).collect();
@@ -1040,7 +1223,8 @@ impl Game {
                     None => format!("stranger from {}", self.group_name(o)),
                 };
                 let doing = if q.sleeping() { "asleep".to_string() } else { q.activity().to_lowercase() };
-                (d, format!("{} ({rel}, {d} tiles away, {doing})", q.name))
+                let away = if d <= 1 { "right beside you".to_string() } else { format!("{d} tiles {}", dir_word(q.tile().x - here.x, q.tile().y - here.y)) };
+                (d, format!("{} ({rel}, {away}, {doing})", q.name))
             })
             .collect();
         near.sort_by_key(|x| x.0);
@@ -1164,6 +1348,40 @@ fn inner_voice(m: &pw_colony::Mind, n: &pw_colony::Needs, has_needs: bool, label
         c.push(if m.mood > 0.5 { "Not a bad day.".into() } else { "Another day.".into() });
     }
     c.swap_remove(rng.below(c.len()))
+}
+
+/// "pine trees", "berry bushes", "deer".
+fn plural(s: &str) -> String {
+    if s.ends_with("deer") || s.ends_with("sheep") || s.ends_with('s') {
+        s.to_string()
+    } else if s.ends_with("sh") || s.ends_with("ch") || s.ends_with('x') {
+        format!("{s}es")
+    } else if s.ends_with('y') && !s.ends_with("ey") {
+        format!("{}ies", &s[..s.len() - 1])
+    } else if s.ends_with("wolf") {
+        format!("{}ves", &s[..s.len() - 1])
+    } else {
+        format!("{s}s")
+    }
+}
+
+/// "north-east" for a tile offset (+y is north).
+fn dir_word(dx: i32, dy: i32) -> &'static str {
+    if dx == 0 && dy == 0 {
+        return "here";
+    }
+    let a = (dy as f32).atan2(dx as f32).to_degrees();
+    let i = (((a + 360.0 + 22.5) % 360.0) / 45.0) as usize;
+    ["east", "north-east", "north", "north-west", "west", "south-west", "south", "south-east"][i % 8]
+}
+
+/// "right here", "next to you", "6 tiles south".
+fn where_word(d: i32, dx: i32, dy: i32) -> String {
+    match d {
+        0 => "right here".into(),
+        1 => "next to you".into(),
+        _ => format!("{d} tiles {}", dir_word(dx, dy)),
+    }
 }
 
 fn capitalize(s: &str) -> String {

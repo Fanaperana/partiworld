@@ -1504,6 +1504,8 @@ impl Colony {
 
     /// Cook something the colony is short of, if there is a station and food to cook.
     fn find_cook(&mut self, pawn: &mut Pawn, ctx: &mut Ctx, job: &str) -> Option<Job> {
+        // Only people who eat meals cook (tribes share their food differently).
+        ctx.content.creatures.by_idx(pawn.creature).needs.as_ref()?;
         let here = pawn.tile();
         // Everyone who eats, including this cook (who is out of the list while thinking).
         let eaters = 1 + self.pawns.iter().filter(|p| ctx.content.creatures.by_idx(p.creature).needs.is_some()).count();
