@@ -3,7 +3,10 @@
 //! for colonists, items and blueprints. All images are generated from
 //! particle data; there are no sprite files.
 
+mod light;
+
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
@@ -132,12 +135,26 @@ struct AnimalSprite;
 struct NightTint;
 #[derive(Component)]
 struct FogTint;
+/// Per-chunk sun shadows and night light.
+#[derive(Component)]
+struct LightLayer;
 
 struct ChunkView {
     base: Entity,
     over: Entity,
     base_img: Handle<Image>,
     over_img: Handle<Image>,
+    /// Sun shadows on the ground (above `base`, below people).
+    shadow: Entity,
+    shadow_img: Handle<Image>,
+    /// `Sun::key` the shadows were drawn for (0 = redraw).
+    shadow_key: u32,
+    /// Darkness and fire light at night (above everything in the world).
+    night: Entity,
+    night_img: Handle<Image>,
+    /// Darkness it was drawn at, and when (seconds), so fires keep flickering in.
+    night_dark: f32,
+    night_at: f32,
 }
 
 #[derive(Resource, Default)]
@@ -163,6 +180,8 @@ struct Views {
     look: Look,
     /// Bumped when content changes so cached sprites rebuild.
     content_ptr: usize,
+    /// The sun this frame (for shadows under people too).
+    sun: light::Sun,
 }
 
 pub struct PwRenderPlugin;
@@ -176,7 +195,7 @@ impl Plugin for PwRenderPlugin {
             .add_systems(Startup, setup_camera)
             .add_systems(
                 Update,
-                (run_sim, update_view, sync_chunks, sync_items, sync_blueprints, sync_pawns, sync_animals, day_night, weather_fx, draw_flashes, draw_zones).chain(),
+                (run_sim, update_view, sync_chunks, light_chunks, sync_items, sync_blueprints, sync_pawns, sync_animals, day_night, weather_fx, draw_flashes, draw_zones).chain(),
             );
     }
 }
@@ -193,15 +212,19 @@ fn setup_camera(mut commands: Commands, game: Res<GameRes>) {
     commands.spawn((Sprite::from_color(Color::NONE, Vec2::ONE), Transform::from_xyz(x, y, 51.0), FogTint));
 }
 
-/// The sky tint for this moment: night blue, dawn pink-orange, dusk orange-violet.
+/// The sky tint for this moment: dawn pink-orange, dusk orange-violet.
+/// (Night darkness is drawn per chunk, so fires can light it.)
 fn sky_color(g: &Game) -> Color {
     let l = g.light();
-    let night = Vec3::new(0.03, 0.05, 0.16);
     let glow = if l.dawn { Vec3::new(1.0, 0.62, 0.45) } else { Vec3::new(0.95, 0.42, 0.28) };
-    let w = l.warm / (l.warm + l.dark + 1e-3);
-    let c = night.lerp(glow, w);
-    let a = (0.6 * l.dark + 0.22 * l.warm).min(0.72);
-    Color::srgba(c.x, c.y, c.z, a)
+    Color::srgba(glow.x, glow.y, glow.z, 0.22 * l.warm * (1.0 - l.dark * 0.5))
+}
+
+/// How dark the night layer is: deep, but the land stays readable.
+/// (Blending happens in linear light, so 0.94 looks like about a quarter of
+/// daylight, not 6%.)
+fn darkness(g: &Game) -> f32 {
+    g.light().dark * 0.94
 }
 
 #[allow(clippy::type_complexity)]
@@ -292,6 +315,68 @@ fn run_sim(time: Res<Time>, mut clock: ResMut<SimClock>, mut game: ResMut<GameRe
         clock.acc = 0.0; // falling behind; drop time rather than spiral
     }
     clock.last_ticks = n;
+}
+
+/// Sun shadows and night light for each chunk, redrawn when the sun moves,
+/// the night deepens or the chunk changes, within a few milliseconds a frame.
+#[allow(clippy::type_complexity)]
+fn light_chunks(
+    game: Res<GameRes>,
+    mut views: ResMut<Views>,
+    mut images: ResMut<Assets<Image>>,
+    time: Res<Time>,
+    cam: Query<&Transform, With<MainCamera>>,
+    mut vis: Query<&mut Visibility, With<LightLayer>>,
+) {
+    let g = &game.0;
+    let sun = light::sun(g);
+    views.sun = sun;
+    let dark = darkness(g);
+    let now = time.elapsed_secs();
+    let leafless = views.look.drop >= 6;
+    let heights = light::heights(&g.content, leafless);
+    let glows = light::glows(&g.content);
+    // Nearest chunks first, so what you look at is right soonest.
+    let at = cam.single().map(|t| t.translation.truncate()).unwrap_or_default();
+    let mut order: Vec<(f32, ChunkPos)> = views
+        .chunks
+        .keys()
+        .map(|cp| {
+            let (x, y) = cp.origin();
+            (Vec2::new(x as f32, y as f32).distance_squared(at), *cp)
+        })
+        .collect();
+    order.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let start = Instant::now();
+    let budget = 5.0; // ms
+    for (_, cp) in order {
+        let Some(v) = views.chunks.get_mut(&cp) else { continue };
+        if let Ok(mut s) = vis.get_mut(v.shadow) {
+            s.set_if_neq(if sun.strength > 0.01 { Visibility::Inherited } else { Visibility::Hidden });
+        }
+        if let Ok(mut s) = vis.get_mut(v.night) {
+            s.set_if_neq(if dark > 0.01 { Visibility::Inherited } else { Visibility::Hidden });
+        }
+        let out_of_time = start.elapsed().as_secs_f32() * 1000.0 > budget;
+        if sun.strength > 0.01 && v.shadow_key != sun.key && !out_of_time {
+            if let Some(mut img) = images.get_mut(&v.shadow_img)
+                && let Some(data) = img.data.as_mut()
+            {
+                light::paint_shadows(&g.world, cp, &sun, &heights, data);
+            }
+            v.shadow_key = sun.key;
+        }
+        let stale = (v.night_dark - dark).abs() > 0.02 || now - v.night_at > 0.6;
+        if dark > 0.01 && stale && !out_of_time {
+            if let Some(mut img) = images.get_mut(&v.night_img)
+                && let Some(data) = img.data.as_mut()
+            {
+                light::paint_night(&g.world, cp, dark, &glows, data);
+            }
+            v.night_dark = dark;
+            v.night_at = now;
+        }
+    }
 }
 
 /// Tell the game which chunks the camera sees, then stream.
@@ -412,7 +497,6 @@ fn mat_at(v: &[MatId], lx: i32, ly: i32) -> MatId {
 fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [u8], look: Look) {
     let (ox, oy) = chunk.pos.origin();
     let solid = &chunk.mat[1];
-    let overlay = &chunk.mat[2];
     let blocks = |m: MatId| m != NONE_MAT && content.mat_rt(m).blocks;
     // Bushes: leafy solids and the berries on them.
     let bushy = |m: MatId| m != NONE_MAT && (content.mat_rt(m).leaves || content.mat_rt(m).fruit);
@@ -442,21 +526,13 @@ fn paint_base(chunk: &Chunk, content: &Content, seed: u64, r: Rect, base: &mut [
                 if !fr.water && snowy(seed, x, y, look.snow) {
                     c = mix(c, SNOW, 0.9);
                 }
-                // Shadows from walls/rocks just below them and from canopies offset down-right.
-                if blocks(mat_at(solid, lx, ly + 1)) {
-                    c = shade(c, 0.6);
-                } else if blocks(mat_at(solid, lx - 1, ly + 2)) {
+                // Soft contact shading right against walls, rocks and bushes;
+                // the sun casts the real shadows (see `light`).
+                let near = |f: &dyn Fn(MatId) -> bool| [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| f(mat_at(solid, lx + dx, ly + dy)));
+                if near(&blocks) {
                     c = shade(c, 0.8);
-                } else if bushy(mat_at(solid, lx - 1, ly + 1)) {
-                    // Bushes cast a short shadow down-right.
-                    c = shade(c, 0.7);
-                } else if bushy(mat_at(solid, lx - 2, ly + 2)) {
-                    c = shade(c, 0.84);
-                } else {
-                    let o = mat_at(overlay, lx - 3, ly + 3);
-                    if o != NONE_MAT && content.mat_rt(o).color[3] > 128 {
-                        c = shade(c, 0.78);
-                    }
+                } else if near(&bushy) {
+                    c = shade(c, 0.88);
                 }
                 c
             };
@@ -657,10 +733,12 @@ fn sync_chunks(
     let gone: Vec<ChunkPos> = views.chunks.keys().filter(|c| !g.world.chunks.contains_key(c)).copied().collect();
     for c in gone {
         let v = views.chunks.remove(&c).unwrap();
-        commands.entity(v.base).despawn();
-        commands.entity(v.over).despawn();
-        images.remove(&v.base_img);
-        images.remove(&v.over_img);
+        for e in [v.base, v.over, v.shadow, v.night] {
+            commands.entity(e).despawn();
+        }
+        for h in [&v.base_img, &v.over_img, &v.shadow_img, &v.night_img] {
+            images.remove(h);
+        }
     }
     let mut full_paints = 0;
     for (cp, chunk) in g.world.chunks.iter_mut() {
@@ -675,7 +753,22 @@ fn sync_chunks(
             let over = commands
                 .spawn((Sprite::from_image(over_img.clone()), Transform::from_xyz(center.x, center.y, 20.0), ChunkLayer))
                 .id();
-            views.chunks.insert(*cp, ChunkView { base, over, base_img, over_img });
+            let shadow_img = images.add(new_image(CHUNK as u32, CHUNK as u32));
+            let shadow = commands.spawn((Sprite::from_image(shadow_img.clone()), Transform::from_xyz(center.x, center.y, 1.0), LightLayer)).id();
+            // Light changes smoothly: a coarse image, drawn with filtering.
+            let n = light::night_size() as u32;
+            let mut night_raw = new_image(n, n);
+            night_raw.sampler = ImageSampler::linear();
+            let night_img = images.add(night_raw);
+            let mut night_sprite = Sprite::from_image(night_img.clone());
+            // Show the inside; the border pixels only feed the smoothing.
+            night_sprite.rect = Some(bevy::math::Rect::new(1.0, 1.0, n as f32 - 1.0, n as f32 - 1.0));
+            night_sprite.custom_size = Some(Vec2::splat(CHUNK as f32));
+            let night = commands.spawn((night_sprite, Transform::from_xyz(center.x, center.y, 30.0), Visibility::Hidden, LightLayer)).id();
+            views.chunks.insert(
+                *cp,
+                ChunkView { base, over, base_img, over_img, shadow, shadow_img, shadow_key: 0, night, night_img, night_dark: -1.0, night_at: -9.0 },
+            );
             chunk.mark_render_all();
         }
         if !chunk.render_dirty {
@@ -705,6 +798,11 @@ fn sync_chunks(
         }
         chunk.render_dirty = false;
         chunk.render_rect = None;
+        // Something changed here: its shadows (and light) are redrawn too.
+        if let Some(v) = views.chunks.get_mut(cp) {
+            v.shadow_key = 0;
+            v.night_at = -9.0;
+        }
     }
     // See-through circles moved: repaint the overlay where they were and are.
     if holes != views.holes {
@@ -1093,7 +1191,8 @@ fn sync_pawns(
         let carry_pos = Transform::from_xyz(d.x + 3.0, d.y + 4.0, 11.0);
         // Shadow under the feet: sprites are centred, so drop by half the height.
         let feet = g.content.creature_rt[p.creature].sprite.h as f32 * 0.5;
-        let shadow_pos = Transform::from_xyz(d.x + 0.5, d.y - feet + 0.5, 9.0);
+        let lean = views.sun.dir * (views.sun.len * views.sun.strength).min(2.5) * 1.5;
+        let shadow_pos = Transform::from_xyz(d.x + 0.5 + lean.x, d.y - feet + 0.5 + lean.y, 9.0);
         match views.pawns.get(&key) {
             Some(&(e, c, sh)) => {
                 if let Ok((mut t, mut s)) = bodies.get_mut(e) {
