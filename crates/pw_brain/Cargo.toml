@@ -1,0 +1,12 @@
+[package]
+name = "pw_brain"
+description = "A small language model (Qwen3 0.6B, ONNX) run inside the game on the CPU"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+# ONNX Runtime; its default features fetch the runtime library at build time.
+ort = "=2.0.0-rc.15"
+tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }

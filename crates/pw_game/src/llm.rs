@@ -1,8 +1,10 @@
 //! A bridge to a language model that can take over a person's mind.
 //!
-//! Requests go to any OpenAI-style chat endpoint (Ollama, llama.cpp's
-//! server, LM Studio, or a hosted API) on a background thread, so the
-//! simulation never waits on the model. Replies come back as JSON:
+//! By default the game runs its own small model (Qwen3 0.6B, ONNX, on the
+//! CPU; see `pw_brain`). It can instead use any OpenAI-style chat endpoint
+//! (Ollama, llama.cpp's server, LM Studio, or a hosted API). Either way the
+//! work happens on a background thread, so the simulation never waits on the
+//! model. Replies come back as JSON:
 //! `{"thought": "...", "say": "...", "do": "..."}`; anything the model gets
 //! wrong is forgiven (plain text becomes speech, unknown actions are ignored).
 
@@ -17,6 +19,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
+    /// Run the game's own model (in `model_dir`) instead of calling `url`.
+    pub builtin: bool,
+    /// Folder with the built-in model's ONNX file and tokenizer.
+    pub model_dir: String,
+    /// Built-in model: most tokens spent reasoning before deciding (0 = no reasoning).
+    pub think_tokens: u32,
+    /// Built-in model: CPU threads to use (0 = half the cores).
+    pub threads: u32,
     /// Chat completions URL.
     pub url: String,
     pub model: String,
@@ -33,6 +43,10 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
+            builtin: true,
+            model_dir: pw_brain::DEFAULT_DIR.into(),
+            think_tokens: 256,
+            threads: 0,
             url: "http://localhost:11434/v1/chat/completions".into(),
             model: "llama3.2:3b".into(),
             api_key: String::new(),
@@ -45,6 +59,16 @@ impl Default for LlmConfig {
 }
 
 impl LlmConfig {
+    /// The model's name for messages.
+    pub fn label(&self) -> String {
+        if self.builtin { "the built-in Qwen3 0.6B".into() } else { self.model.clone() }
+    }
+
+    /// Is the built-in model downloaded?
+    pub fn builtin_ready(&self) -> bool {
+        pw_brain::model_file(Path::new(&self.model_dir)).is_some()
+    }
+
     /// From a JSON file, then `PW_LLM_URL` / `PW_LLM_MODEL` / `PW_LLM_KEY`.
     pub fn load(path: &Path) -> Self {
         let mut c: LlmConfig = std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
@@ -136,10 +160,27 @@ impl Llm {
         let (tx, worker_rx) = channel::<Request>();
         let (worker_tx, rx) = channel::<Reply>();
         let spawned = std::thread::Builder::new().name("pw-llm".into()).spawn(move || {
+            // The built-in model, loaded on first use and kept.
+            let mut local: Option<(String, pw_brain::LocalModel)> = None;
+            let mut seed = 0x9E37_79B9_7F4A_7C15u64;
             while let Ok(req) = worker_rx.recv() {
                 let t0 = Instant::now();
-                let mut reply = match call(&req.cfg, &req.system, &req.user) {
-                    Ok(text) => parse_reply(&text),
+                let answer = if req.cfg.builtin {
+                    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    run_builtin(&mut local, &req, seed)
+                } else {
+                    call(&req.cfg, &req.system, &req.user).map(|t| (t, String::new()))
+                };
+                let mut reply = match answer {
+                    Ok((text, thinking)) => {
+                        let mut r = parse_reply(&text);
+                        // No thought in the answer: use the end of its reasoning, if readable.
+                        if r.thought.is_empty() && !thinking.is_empty() && thinking.is_ascii() {
+                            let last = thinking.trim().rsplit(['.', '\n']).find(|s| s.trim().len() > 12).unwrap_or("").trim();
+                            r.thought = clip(last, 200);
+                        }
+                        r
+                    }
                     Err(e) => Reply { error: Some(e), ..Default::default() },
                 };
                 reply.uid = req.uid;
@@ -211,11 +252,35 @@ impl Llm {
                     self.errors += 1;
                     self.status = format!("Error: {e}");
                 }
-                None => self.status = format!("OK - {} answered in {:.1}s", self.cfg.model, r.secs),
+                None => self.status = format!("OK - {} answered in {:.1}s", self.cfg.label(), r.secs),
             }
         }
         out
     }
+}
+
+/// Answer with the game's own model, loading it first if needed.
+/// Returns (answer, reasoning).
+fn run_builtin(local: &mut Option<(String, pw_brain::LocalModel)>, req: &Request, seed: u64) -> Result<(String, String), String> {
+    let cfg = &req.cfg;
+    if local.as_ref().is_none_or(|(dir, _)| dir != &cfg.model_dir) {
+        let threads = if cfg.threads > 0 {
+            cfg.threads as usize
+        } else {
+            std::thread::available_parallelism().map(|n| n.get() / 2).unwrap_or(2).max(1)
+        };
+        let m = pw_brain::LocalModel::load(Path::new(&cfg.model_dir), threads).map_err(|e| format!("built-in model: {e}"))?;
+        *local = Some((cfg.model_dir.clone(), m));
+    }
+    let (_, m) = local.as_mut().ok_or("built-in model not loaded")?;
+    // Reason when deciding what to do; chat lines must come quickly.
+    let think = if req.purpose == Purpose::Decide { cfg.think_tokens as usize } else { 0 };
+    let opt = pw_brain::GenOptions { max_tokens: think + cfg.max_tokens as usize, think_tokens: think, temperature: cfg.temperature, seed };
+    let g = m.chat(&req.system, &req.user, &opt)?;
+    if g.text.trim().is_empty() {
+        return Err("the model ran out of room while thinking (raise Max reply or lower Thinking)".into());
+    }
+    Ok((g.text, g.thinking))
 }
 
 fn agent(secs: u64) -> ureq::Agent {
@@ -258,7 +323,15 @@ fn call_once(cfg: &LlmConfig, system: &str, user: &str, json: bool) -> Result<St
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("not JSON: {e}"))?;
     // OpenAI style, then Ollama's own /api/chat and /api/generate.
     let content = v["choices"][0]["message"]["content"].as_str().or_else(|| v["message"]["content"].as_str()).or_else(|| v["response"].as_str());
-    content.map(str::to_string).ok_or_else(|| "no message in the answer".into())
+    let reasoning = v["choices"][0]["message"]["reasoning"].as_str().or_else(|| v["choices"][0]["message"]["reasoning_content"].as_str());
+    match content {
+        // Reasoning models can spend the whole budget thinking.
+        Some(c) if c.trim().is_empty() && reasoning.is_some_and(|r| !r.is_empty()) => {
+            Err("the model used up Max reply while thinking; raise it".into())
+        }
+        Some(c) => Ok(c.to_string()),
+        None => Err("no message in the answer".into()),
+    }
 }
 
 /// The models an OpenAI-style server offers (`/v1/models`), or Ollama's `/api/tags`.

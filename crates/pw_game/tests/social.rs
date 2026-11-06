@@ -136,6 +136,7 @@ fn serde_json_body(content: &str) -> String {
 #[test]
 fn a_hooked_person_says_and_does_what_the_model_says() {
     let mut g = new_game(5);
+    g.social.llm.cfg.builtin = false;
     g.social.llm.cfg.url = fake_model(r#"{"thought": "I could use a walk.", "say": "Off to see what's out there!", "do": "explore"}"#, 4);
     let w = Who { owner: 0, id: g.colony.pawns[0].id };
     g.set_hooked(w, true);
@@ -176,7 +177,7 @@ fn a_dead_model_doesnt_stall_the_world() {
 fn live_model() {
     let Ok(model) = std::env::var("PW_LIVE_MODEL") else { return };
     let mut g = new_game(5);
-    g.social.llm.cfg = llm::LlmConfig { model, think_every: 8.0, ..Default::default() };
+    g.social.llm.cfg = llm::LlmConfig { model, builtin: false, think_every: 8.0, ..Default::default() };
     for p in &mut g.colony.pawns {
         p.mind.company = 0.05;
     }

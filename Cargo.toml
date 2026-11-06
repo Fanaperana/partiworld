@@ -38,6 +38,7 @@ pw_game = { path = "crates/pw_game" }
 pw_save = { path = "crates/pw_save" }
 pw_render = { path = "crates/pw_render" }
 pw_ui = { path = "crates/pw_ui" }
+pw_brain = { path = "crates/pw_brain" }
 
 [dependencies]
 bevy.workspace = true

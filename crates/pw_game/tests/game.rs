@@ -1022,3 +1022,34 @@ fn cooks_roast_meat_at_a_campfire_and_meals_are_eaten_first() {
     });
     assert!(ate, "should eat a meal: {}", g.colony.pawns.iter().find(|p| p.id == id).unwrap().activity());
 }
+
+/// The built-in model thinks for a colonist (needs models/qwen3-0.6b):
+/// `cargo test --release -p pw_game --test game builtin_model -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn builtin_model_thinks_for_a_colonist() {
+    let mut g = new_game(41);
+    g.social.llm.cfg.builtin = true;
+    g.social.llm.cfg.model_dir = mods_dir().join("../../models/qwen3-0.6b").to_string_lossy().to_string();
+    assert!(g.social.llm.cfg.builtin_ready(), "model not downloaded");
+    let w = Who { owner: 0, id: g.colony.pawns[0].id };
+    g.colony.pawns[0].needs.food = 0.35;
+    g.set_hooked(w, true);
+    let t = std::time::Instant::now();
+    let mut answers = 0;
+    while t.elapsed().as_secs() < 150 && answers < 3 {
+        g.step();
+        let calls = g.social.llm.calls;
+        if calls > answers {
+            answers = calls;
+            let p = g.person(w).unwrap();
+            println!("[{:.0}s] {} | thought: {} | doing: {} | status: {}", t.elapsed().as_secs_f32(), p.name, p.mind.thought, p.activity(), g.social.llm.status);
+            for l in g.social.feed.iter().filter(|l| l.model) {
+                println!("    said to {}: {}", l.to, l.text);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(g.social.llm.errors == 0, "{}", g.social.llm.status);
+    assert!(answers >= 1, "no answer: {}", g.social.llm.status);
+}

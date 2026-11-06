@@ -17,5 +17,6 @@ pw_tribe.workspace = true
 serde.workspace = true
 rhai.workspace = true
 serde_json.workspace = true
+pw_brain.workspace = true
 ureq.workspace = true
 [dev-dependencies]

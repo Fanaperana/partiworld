@@ -112,7 +112,7 @@ pub fn person_window(ui: &mut egui::Ui, g: &mut Game, st: &mut UiState) {
 
     ui.separator();
     let mut hooked = m.hooked;
-    let model = g.social.llm.cfg.model.clone();
+    let model = g.social.llm.cfg.label();
     if ui
         .checkbox(&mut hooked, format!("Let a model think for {} ({model})", p.name))
         .on_hover_text("A language model picks what they say and do next. Set it up in Model settings.")
@@ -158,24 +158,46 @@ fn day_time(tick: u64) -> (u64, u32, u32) {
 
 /// Where the model lives and how often it's asked.
 pub fn model_window(ui: &mut egui::Ui, g: &mut Game, st: &mut UiState) {
-    ui.label("Any OpenAI-style chat endpoint works: Ollama, llama.cpp's server, LM Studio, or a hosted API.");
-    ui.label(egui::RichText::new("Ollama: install it, run `ollama pull llama3.2:3b`, keep the default URL. 3B+ models play their part far better than 1B ones.").small().weak());
     let cfg = &mut g.social.llm.cfg;
+    ui.checkbox(&mut cfg.builtin, "Use the built-in model (Qwen3 0.6B, runs on the CPU)")
+        .on_hover_text("A small reasoning model the game runs itself: no server, no internet. Untick to use Ollama or another server instead.");
+    if cfg.builtin {
+        let ready = cfg.builtin_ready();
+        let (text, color) = if ready {
+            (format!("Ready in {}. It loads the first time someone thinks (a few seconds).", cfg.model_dir), MODEL)
+        } else {
+            (format!("Not downloaded: put model_int8.onnx, tokenizer.json and config.json in {} (see the README).", cfg.model_dir), BAD)
+        };
+        ui.label(egui::RichText::new(text).small().color(color));
+    } else {
+        ui.label("Any OpenAI-style chat endpoint works: Ollama, llama.cpp's server, LM Studio, or a hosted API.");
+        ui.label(egui::RichText::new("Ollama: install it, run `ollama pull qwen3:0.6b` (or a bigger model), keep the default URL.").small().weak());
+    }
     egui::Grid::new("model_cfg").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label("URL");
-        ui.add(egui::TextEdit::singleline(&mut cfg.url).desired_width(300.0));
-        ui.end_row();
-        ui.label("Model");
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut cfg.model).desired_width(220.0));
-            if ui.small_button("Find models").on_hover_text("Ask the server what it has").clicked() {
-                st.finding = true;
-            }
-        });
-        ui.end_row();
-        ui.label("API key");
-        ui.add(egui::TextEdit::singleline(&mut cfg.api_key).password(true).desired_width(300.0).hint_text("only for hosted APIs"));
-        ui.end_row();
+        if cfg.builtin {
+            ui.label("Thinking");
+            ui.add(egui::Slider::new(&mut cfg.think_tokens, 0..=800).suffix(" tokens"))
+                .on_hover_text("How long it may reason before deciding what to do. 0 = answer straight away (faster, less sensible). Chat lines never wait for reasoning.");
+            ui.end_row();
+            ui.label("CPU threads");
+            ui.add(egui::Slider::new(&mut cfg.threads, 0..=16)).on_hover_text("0 = half your cores. Takes effect the next time the game starts.");
+            ui.end_row();
+        } else {
+            ui.label("URL");
+            ui.add(egui::TextEdit::singleline(&mut cfg.url).desired_width(300.0));
+            ui.end_row();
+            ui.label("Model");
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut cfg.model).desired_width(220.0));
+                if ui.small_button("Find models").on_hover_text("Ask the server what it has").clicked() {
+                    st.finding = true;
+                }
+            });
+            ui.end_row();
+            ui.label("API key");
+            ui.add(egui::TextEdit::singleline(&mut cfg.api_key).password(true).desired_width(300.0).hint_text("only for hosted APIs"));
+            ui.end_row();
+        }
         ui.label("Think every");
         ui.add(egui::Slider::new(&mut cfg.think_every, 3.0..=120.0).suffix(" s"));
         ui.end_row();
@@ -183,11 +205,13 @@ pub fn model_window(ui: &mut egui::Ui, g: &mut Game, st: &mut UiState) {
         ui.add(egui::Slider::new(&mut cfg.temperature, 0.0..=1.5));
         ui.end_row();
         ui.label("Max reply");
-        ui.add(egui::Slider::new(&mut cfg.max_tokens, 40..=600).suffix(" tokens"));
+        ui.add(egui::Slider::new(&mut cfg.max_tokens, 40..=600).suffix(" tokens")).on_hover_text("Room for the answer (the built-in model's thinking comes on top).");
         ui.end_row();
-        ui.label("");
-        ui.checkbox(&mut cfg.json_mode, "Ask for JSON output").on_hover_text("Helps small models answer in the right shape. Turned off automatically if the server refuses it.");
-        ui.end_row();
+        if !cfg.builtin {
+            ui.label("");
+            ui.checkbox(&mut cfg.json_mode, "Ask for JSON output").on_hover_text("Helps small models answer in the right shape. Turned off automatically if the server refuses it.");
+            ui.end_row();
+        }
     });
     if st.finding {
         st.finding = false;

@@ -48,7 +48,23 @@ cd partiworld
 cargo run --release -- 1337
 ```
 
-The number is the world seed; leave it out for the default world. The first build takes a few minutes.
+The number is the world seed; leave it out for the default world. The first build takes a few minutes (it also fetches the ONNX Runtime library).
+
+**Optional: the built-in model.** For colonists that think with a small language model, download Qwen3 0.6B (about 630 MB) into `models/qwen3-0.6b`:
+
+```bash
+mkdir -p models/qwen3-0.6b && cd models/qwen3-0.6b
+B=https://huggingface.co/onnx-community/Qwen3-0.6B-ONNX/resolve/main
+for f in tokenizer.json config.json onnx/model_int8.onnx; do curl -LO "$B/$f"; done
+```
+
+On Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force models/qwen3-0.6b | Out-Null
+$B = "https://huggingface.co/onnx-community/Qwen3-0.6B-ONNX/resolve/main"
+foreach ($f in "tokenizer.json", "config.json", "onnx/model_int8.onnx") { Invoke-WebRequest "$B/$f" -OutFile "models/qwen3-0.6b/$(Split-Path $f -Leaf)" }
+```
 
 ## What you can do
 
@@ -99,8 +115,9 @@ The number is the world seed; leave it out for the default world. The first buil
 **Hook a language model into someone's head**
 - In the Character window, tick **Let a model think for them**. A language model then decides what that person says and does next (work, eat, sleep, warm up, rest, wander, explore, go home, or walk over and talk to someone), and voices their lines when they chat. Their thoughts show in violet, and a violet mark floats over their head.
 - The model gets plain notes about the person: time and weather, mood and why, hunger and tiredness, what they're doing, who is nearby and what they think of them, and recent memories. **Show notes sent to the model** displays exactly what it reads.
-- It works with any OpenAI-style chat endpoint: [Ollama](https://ollama.com), llama.cpp's server, LM Studio, or a hosted API. With Ollama: install it, run `ollama pull llama3.2:3b`, and keep the default URL. **Model settings** has the URL, model (with a *Find models* button), API key, how often each person thinks, and a *Test* button; *Save* writes them to `saves/model.json`. `PW_LLM_URL`, `PW_LLM_MODEL` and `PW_LLM_KEY` override the file.
-- Requests run in the background, so the world never waits for the model. If it's slow or down, people carry on with their usual habits. Small models (1B) often lose the thread; 3B and up play the part much better.
+- **Built in, on the CPU.** By default the game runs its own model: Qwen3 0.6B, a small reasoning model, through ONNX Runtime. No server, no GPU, no internet once it's downloaded (see [Play](#play)). It loads in about 2 seconds the first time someone thinks. Before deciding what to do it reasons for a while (the *Thinking* slider, 256 tokens by default), then answers. On a laptop CPU that's about 15 seconds per decision; chat lines skip the reasoning and come in a few seconds.
+- **Or a server.** Untick *Use the built-in model* in **Model settings** to use any OpenAI-style chat endpoint: [Ollama](https://ollama.com), llama.cpp's server, LM Studio, or a hosted API. With Ollama: install it, run `ollama pull qwen3:0.6b` (or a bigger model), and keep the default URL. **Model settings** has the URL, model (with a *Find models* button), API key, how often each person thinks, and a *Test* button; *Save* writes them to `saves/model.json`. `PW_LLM_URL`, `PW_LLM_MODEL` and `PW_LLM_KEY` override the file.
+- Requests run in the background, so the world never waits for the model. If it's slow or down, people carry on with their usual habits. Bigger models play the part better; the built-in one is small enough to run anywhere.
 
 **Physics**
 - Water fills dug channels, freezes into walkable ice in winter and thaws in spring.
@@ -158,6 +175,7 @@ The simulation has no dependency on the game engine. It runs headless, which is 
 | `pw_life` | Wild animals: perception, decisions, a learning brain, genes, breeding, evolution and species |
 | `pw_tribe` | Tribes: a chief AI on top of the colony job system, learned culture, research, births, deaths and daughter tribes |
 | `pw_game` | The tick loop, seasons and weather, chunk streaming, player tools, script API, Rust plugin hooks; the social life of people and the bridge to a language model |
+| `pw_brain` | The built-in language model: Qwen3 0.6B (ONNX) run on the CPU with ONNX Runtime, with its reasoning capped so answers come in time |
 | `pw_save` | Saves only the chunks you changed; content is saved by id so saves survive mod changes |
 | `pw_render` | Chunk textures, sprites, lighting and weather effects, all drawn from particle data (no sprite files) |
 | `pw_ui` | Panels, tools and the object editor ([egui](https://github.com/emilk/egui)) |
@@ -282,8 +300,9 @@ Tools for testing:
   - `PW_AUTOSHOT_TRIBES=N`: let the tribes live N days, then look at one
   - `PW_AUTOSHOT_NEEDS=1`: select a hungry colonist to show its needs
   - `PW_AUTOSHOT_HUNT=1`: rabbits and deer nearby, marked for hunting
-  - `PW_AUTOSHOT_PEOPLE=1`: lonely colonists, zoomed in, with the Character and Chatter windows open; add `PW_AUTOSHOT_MODEL=llama3.2:3b` to hook the first one to a model
+  - `PW_AUTOSHOT_PEOPLE=1`: lonely colonists, zoomed in, with the Character and Chatter windows open; add `PW_AUTOSHOT_MODEL=builtin` (or a server model name like `llama3.2:3b`) to hook the first one to a model
 - **A real model at work:** `PW_LIVE_MODEL=llama3.2:3b cargo test -p pw_game --test social live_model -- --ignored --nocapture` lets a local model run a colonist for 90 seconds and prints its thoughts and lines.
+- **The built-in model:** `cargo test --release -p pw_brain -- --ignored --nocapture` times Qwen3 0.6B on your CPU, with and without reasoning; `cargo test --release -p pw_game --test game builtin_model -- --ignored --nocapture` lets it run a colonist.
 - **Frame times:** `PW_FRAMES=1` prints frame timings.
 
 ## Roadmap

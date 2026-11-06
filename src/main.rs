@@ -188,7 +188,11 @@ fn autoshot(
                 ui.show_person = true;
                 ui.follow = true;
                 if let Ok(m) = std::env::var("PW_AUTOSHOT_MODEL") {
-                    g.social.llm.cfg.model = m;
+                    // "builtin" (or empty) = the game's own model; else a server model name.
+                    g.social.llm.cfg.builtin = m.is_empty() || m == "builtin";
+                    if !g.social.llm.cfg.builtin {
+                        g.social.llm.cfg.model = m;
+                    }
                     g.set_hooked(w, true);
                     ui.show_notes = std::env::var("PW_AUTOSHOT_NOTES").is_ok();
                 }

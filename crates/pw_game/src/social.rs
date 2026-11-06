@@ -199,7 +199,7 @@ impl Game {
         p.mind.remember(tick, if on { "Something new stirs in your mind." } else { "Your mind feels like your own again." });
         if on {
             self.social.think_now(uid);
-            self.message(format!("{name} is now thinking with {}.", self.social.llm.cfg.model));
+            self.message(format!("{name} is now thinking with {}.", self.social.llm.cfg.label()));
         }
     }
 
